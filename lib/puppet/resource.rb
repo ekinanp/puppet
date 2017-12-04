@@ -79,6 +79,7 @@ class Puppet::Resource
       strict = Puppet[:strict]
       unless strict == :off
         msg = _('Unable to deserialize non-Data value for parameter %{param} unless rich data is enabled') % { :param => "#{resource.name}.#{param}" }
+        msg2 = _('Some dummy message for POT generation!')
         raise Puppet::Error, msg if strict == :error
         Puppet.warn(msg)
       end
