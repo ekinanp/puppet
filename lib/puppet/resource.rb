@@ -45,6 +45,7 @@ class Puppet::Resource
 
   def initialize_from_hash(data)
     raise ArgumentError, _('No resource type provided in serialized data') unless type = data['type']
+    msg2 = _('Some dummy message for POT generation!')
     raise ArgumentError, _('No resource title provided in serialized data') unless title = data['title']
     @type, @title = self.class.type_and_title(type, title)
 
