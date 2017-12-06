@@ -6,11 +6,11 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: Puppet automation framework 5.3.0-6-gf66f9d9\n"
+"Project-Id-Version: Puppet automation framework 5.3.2-148-g2d66ec2\n"
 "\n"
 "Report-Msgid-Bugs-To: https://tickets.puppetlabs.com\n"
-"POT-Creation-Date: 2017-09-26 17:02+0000\n"
-"PO-Revision-Date: 2017-09-26 17:02+0000\n"
+"POT-Creation-Date: 2017-12-06 01:12+0000\n"
+"PO-Revision-Date: 2017-12-06 01:12+0000\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "Language: \n"
@@ -1721,7 +1721,7 @@ msgstr ""
 msgid "Timeout waiting for exclusive lock on %{path}"
 msgstr ""
 
-#: ../lib/puppet/file_system/memory_impl.rb:68
+#: ../lib/puppet/file_system/memory_impl.rb:107
 msgid "Unable to find registered object for %{path}"
 msgstr ""
 
@@ -2418,15 +2418,15 @@ msgstr ""
 msgid "Could not load external node results for %{name}: %{detail}"
 msgstr ""
 
-#: ../lib/puppet/indirector/node/ldap.rb:180
+#: ../lib/puppet/indirector/node/ldap.rb:182
 msgid "Could not find parent node '%{parent}'"
 msgstr ""
 
-#: ../lib/puppet/indirector/node/ldap.rb:207
+#: ../lib/puppet/indirector/node/ldap.rb:209
 msgid "Found loop in LDAP node parents; %{parent} appears twice"
 msgstr ""
 
-#: ../lib/puppet/indirector/node/ldap.rb:246
+#: ../lib/puppet/indirector/node/ldap.rb:262
 msgid "Node entry %{entry} specifies more than one parent: %{parents}"
 msgstr ""
 
@@ -3330,11 +3330,11 @@ msgstr ""
 msgid "WEBrick server is not listening"
 msgstr ""
 
-#: ../lib/puppet/network/http/webrick.rb:100
+#: ../lib/puppet/network/http/webrick.rb:101
 msgid "Could not retrieve certificate for %{host} and not running on a valid certificate authority"
 msgstr ""
 
-#: ../lib/puppet/network/http/webrick.rb:108
+#: ../lib/puppet/network/http/webrick.rb:109
 msgid "Could not find CA certificate"
 msgstr ""
 
@@ -4977,7 +4977,7 @@ msgstr ""
 msgid "Enumeration.enumerator is deprecated. Use Iterable.on instead"
 msgstr ""
 
-#: ../lib/puppet/pops/types/p_binary_type.rb:70
+#: ../lib/puppet/pops/types/p_binary_type.rb:77
 msgid "The given string in encoding '%{enc}' is invalid. Cannot create a Binary UTF-8 representation"
 msgstr ""
 
@@ -4993,7 +4993,7 @@ msgstr ""
 msgid "The type '%{type}' does not represent a valid set of parameters for %{subject}.new()"
 msgstr ""
 
-#: ../lib/puppet/pops/types/p_object_type.rb:604
+#: ../lib/puppet/pops/types/p_object_type.rb:610
 msgid "reference to unresolved type '%{name}'"
 msgstr ""
 
@@ -5381,7 +5381,7 @@ msgstr ""
 msgid "No responsefile specified or non existent, not preseeding anything"
 msgstr ""
 
-#: ../lib/puppet/provider/package/aptitude.rb:21 ../lib/puppet/provider/package/ports.rb:20 ../lib/puppet/provider/package/portupgrade.rb:93 ../lib/puppet/provider/package/portupgrade.rb:151 ../lib/puppet/provider/package/rug.rb:28 ../lib/puppet/provider/package/up2date.rb:17 ../lib/puppet/provider/package/yum.rb:214 ../lib/puppet/provider/package/zypper.rb:109
+#: ../lib/puppet/provider/package/aptitude.rb:21 ../lib/puppet/provider/package/ports.rb:20 ../lib/puppet/provider/package/portupgrade.rb:93 ../lib/puppet/provider/package/portupgrade.rb:151 ../lib/puppet/provider/package/rug.rb:28 ../lib/puppet/provider/package/up2date.rb:17 ../lib/puppet/provider/package/yum.rb:229 ../lib/puppet/provider/package/zypper.rb:109
 msgid "Could not find package %{name}"
 msgstr ""
 
@@ -5581,7 +5581,7 @@ msgstr ""
 msgid "Selecting version '%{version}' for implicit '%{should}'"
 msgstr ""
 
-#: ../lib/puppet/provider/package/pkg.rb:215 ../lib/puppet/provider/package/pkg.rb:235
+#: ../lib/puppet/provider/package/pkg.rb:218 ../lib/puppet/provider/package/pkg.rb:238
 msgid "Unable to update %{package}"
 msgstr ""
 
@@ -5706,11 +5706,11 @@ msgstr ""
 msgid "Failed to parse package name and architecture from '%{pkgname}'"
 msgstr ""
 
-#: ../lib/puppet/provider/package/yum.rb:208
+#: ../lib/puppet/provider/package/yum.rb:223
 msgid "Could not find package %{wanted}"
 msgstr ""
 
-#: ../lib/puppet/provider/package/yum.rb:219
+#: ../lib/puppet/provider/package/yum.rb:234
 msgid "Failed to update to version %{should}, got version %{version} instead"
 msgstr ""
 
@@ -5773,34 +5773,38 @@ msgid "No resource type provided in serialized data"
 msgstr ""
 
 #: ../lib/puppet/resource.rb:48
+msgid "Some dummy message for POT generation!"
+msgstr ""
+
+#: ../lib/puppet/resource.rb:49
 msgid "No resource title provided in serialized data"
 msgstr ""
 
-#: ../lib/puppet/resource.rb:481
+#: ../lib/puppet/resource.rb:482
 msgid "The method Puppet::Resource.set_default_parameters is deprecated and will be removed in the next major release of Puppet."
 msgstr ""
 
-#: ../lib/puppet/resource.rb:486
+#: ../lib/puppet/resource.rb:487
 msgid "Cannot evaluate default parameters for %{resource} - not a parser resource"
 msgstr ""
 
-#: ../lib/puppet/resource.rb:526
+#: ../lib/puppet/resource.rb:527
 msgid "The method Puppet::Resource.validate_complete is deprecated and will be removed in the next major release of Puppet."
 msgstr ""
 
-#: ../lib/puppet/resource.rb:532
+#: ../lib/puppet/resource.rb:533
 msgid "Must pass %{param} to %{resource}"
 msgstr ""
 
-#: ../lib/puppet/resource.rb:543
+#: ../lib/puppet/resource.rb:544
 msgid "Expected parameter '%{name}' of '%{value0}' to have type %{value1}, got %{value2}"
 msgstr ""
 
-#: ../lib/puppet/resource.rb:549
+#: ../lib/puppet/resource.rb:550
 msgid "no parameter named '%{name}'"
 msgstr ""
 
-#: ../lib/puppet/resource.rb:664
+#: ../lib/puppet/resource.rb:665
 msgid "No set of title patterns matched the title \"%{title}\"."
 msgstr ""
 
@@ -6207,11 +6211,11 @@ msgstr ""
 msgid "unexpected attributes %{keys} in %{path}"
 msgstr ""
 
-#: ../lib/puppet/ssl/certificate_revocation_list.rb:29
+#: ../lib/puppet/ssl/certificate_revocation_list.rb:30
 msgid "Creating a new certificate revocation list"
 msgstr ""
 
-#: ../lib/puppet/ssl/certificate_revocation_list.rb:49
+#: ../lib/puppet/ssl/certificate_revocation_list.rb:50
 msgid "Revoked certificate with serial %{serial}"
 msgstr ""
 
@@ -6549,35 +6553,35 @@ msgstr ""
 msgid "Only root can execute commands as other users"
 msgstr ""
 
-#: ../lib/puppet/type/exec.rb:268
+#: ../lib/puppet/type/exec.rb:269
 msgid "Invalid environment setting '%{value}'"
 msgstr ""
 
-#: ../lib/puppet/type/exec.rb:281
+#: ../lib/puppet/type/exec.rb:282
 msgid "The umask specification is invalid: %{value}"
 msgstr ""
 
-#: ../lib/puppet/type/exec.rb:297
+#: ../lib/puppet/type/exec.rb:298
 msgid "The timeout must be a number."
 msgstr ""
 
-#: ../lib/puppet/type/exec.rb:315
+#: ../lib/puppet/type/exec.rb:316
 msgid "Tries must be an integer"
 msgstr ""
 
-#: ../lib/puppet/type/exec.rb:319
+#: ../lib/puppet/type/exec.rb:320
 msgid "Tries must be an integer >= 1"
 msgstr ""
 
-#: ../lib/puppet/type/exec.rb:332
+#: ../lib/puppet/type/exec.rb:333
 msgid "try_sleep must be a number"
 msgstr ""
 
-#: ../lib/puppet/type/exec.rb:336
+#: ../lib/puppet/type/exec.rb:337
 msgid "try_sleep cannot be a negative number"
 msgstr ""
 
-#: ../lib/puppet/type/exec.rb:451 ../lib/puppet/type/exec.rb:503
+#: ../lib/puppet/type/exec.rb:452 ../lib/puppet/type/exec.rb:504
 msgid "Check %{value} exceeded timeout"
 msgstr ""
 
@@ -6675,7 +6679,7 @@ msgstr ""
 msgid "Invalid GID %{gid}"
 msgstr ""
 
-#: ../lib/puppet/type/group.rb:163 ../lib/puppet/type/user.rb:594
+#: ../lib/puppet/type/group.rb:163 ../lib/puppet/type/user.rb:613
 msgid "Attributes value pairs must be separated by an ="
 msgstr ""
 
@@ -6747,15 +6751,15 @@ msgstr ""
 msgid "fstype must not be an empty string"
 msgstr ""
 
-#: ../lib/puppet/type/mount.rb:180
+#: ../lib/puppet/type/mount.rb:184
 msgid "options must not contain whitespace: %{value}"
 msgstr ""
 
-#: ../lib/puppet/type/mount.rb:181
+#: ../lib/puppet/type/mount.rb:185
 msgid "options must not be an empty string"
 msgstr ""
 
-#: ../lib/puppet/type/mount.rb:246
+#: ../lib/puppet/type/mount.rb:250
 msgid "name must not contain whitespace: %{value}"
 msgstr ""
 
@@ -6930,85 +6934,85 @@ msgstr ""
 msgid "Password maximum age must be provided as a number."
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:289
+#: ../lib/puppet/type/user.rb:308
 msgid "Group names must be provided, not GID numbers."
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:291
+#: ../lib/puppet/type/user.rb:310
 msgid "Group names must be provided as an array, not a comma-separated list."
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:292
+#: ../lib/puppet/type/user.rb:311
 msgid "Group names must not be empty. If you want to specify \"no groups\" pass an empty array"
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:378
+#: ../lib/puppet/type/user.rb:397
 msgid "User provider %{name} can not manage home directories"
 msgstr ""
 
 #. TRANSLATORS YYYY-MM-DD represents a date with a four-digit year, a two-digit month, and a two-digit day,
 #. TRANSLATORS separated by dashes.
-#: ../lib/puppet/type/user.rb:396
+#: ../lib/puppet/type/user.rb:415
 msgid "Expiry dates must be YYYY-MM-DD or the string \"absent\""
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:473
+#: ../lib/puppet/type/user.rb:492
 msgid "Role names must be provided, not numbers"
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:475
+#: ../lib/puppet/type/user.rb:494
 msgid "Role names must be provided as an array, not a comma-separated list"
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:510
+#: ../lib/puppet/type/user.rb:529
 msgid "Auth names must be provided, not numbers"
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:512
+#: ../lib/puppet/type/user.rb:531
 msgid "Auth names must be provided as an array, not a comma-separated list"
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:536
+#: ../lib/puppet/type/user.rb:555
 msgid "Profile names must be provided, not numbers"
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:538
+#: ../lib/puppet/type/user.rb:557
 msgid "Profile names must be provided as an array, not a comma-separated list"
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:560
+#: ../lib/puppet/type/user.rb:579
 msgid "Key/value pairs must be separated by an ="
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:667
+#: ../lib/puppet/type/user.rb:686
 msgid "Each entry for purge_ssh_keys must be a string, not a %{klass}"
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:670
+#: ../lib/puppet/type/user.rb:689
 msgid "Paths to keyfiles must be absolute, not %{entry}"
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:674
+#: ../lib/puppet/type/user.rb:693
 msgid "purge_ssh_keys must be true, false, or an array of file names, not %{value}"
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:686
+#: ../lib/puppet/type/user.rb:705
 msgid "purge_ssh_keys can only be true for users with a defined home directory"
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:693
+#: ../lib/puppet/type/user.rb:712
 msgid "purge_ssh_keys value '%{value}' meta character ~ or %{home_placeholder} only allowed for users with a defined home directory"
 msgstr ""
 
-#: ../lib/puppet/type/user.rb:707
+#: ../lib/puppet/type/user.rb:726
 msgid "Class name must be provided."
 msgstr ""
 
-#: ../lib/puppet/type/yumrepo.rb:65 ../lib/puppet/type/yumrepo.rb:82 ../lib/puppet/type/yumrepo.rb:129 ../lib/puppet/type/yumrepo.rb:153 ../lib/puppet/type/yumrepo.rb:175 ../lib/puppet/type/yumrepo.rb:303 ../lib/puppet/type/yumrepo.rb:369
+#: ../lib/puppet/type/yumrepo.rb:65 ../lib/puppet/type/yumrepo.rb:82 ../lib/puppet/type/yumrepo.rb:138 ../lib/puppet/type/yumrepo.rb:162 ../lib/puppet/type/yumrepo.rb:184 ../lib/puppet/type/yumrepo.rb:312 ../lib/puppet/type/yumrepo.rb:378
 msgid "Must be a valid URL"
 msgstr ""
 
-#: ../lib/puppet/type/yumrepo.rb:261
+#: ../lib/puppet/type/yumrepo.rb:270
 msgid "Must be within range 1-99"
 msgstr ""
 
@@ -7735,27 +7739,27 @@ msgstr ""
 msgid "Caught exception %{klass}:%{error} retrying"
 msgstr ""
 
-#: ../lib/puppet/util/selinux.rb:67
+#: ../lib/puppet/util/selinux.rb:68
 msgid "Invalid context to parse: %{context}"
 msgstr ""
 
-#: ../lib/puppet/util/selinux.rb:79
+#: ../lib/puppet/util/selinux.rb:80
 msgid "Invalid SELinux parameter type"
 msgstr ""
 
-#: ../lib/puppet/util/selinux.rb:100
+#: ../lib/puppet/util/selinux.rb:101
 msgid "Can't set SELinux context on file unless the file already has some kind of context"
 msgstr ""
 
-#: ../lib/puppet/util/selinux.rb:114
+#: ../lib/puppet/util/selinux.rb:115
 msgid "set_selinux_context component must be one of :seluser, :selrole, :seltype, or :selrange"
 msgstr ""
 
-#: ../lib/puppet/util/selinux.rb:125
+#: ../lib/puppet/util/selinux.rb:126
 msgid "Failed to set SELinux context %{context} on %{file}"
 msgstr ""
 
-#: ../lib/puppet/util/selinux.rb:176
+#: ../lib/puppet/util/selinux.rb:177
 msgid "Could not open SELinux category translation file %{path}."
 msgstr ""
 
