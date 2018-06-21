@@ -3,7 +3,7 @@
 <!-- Original puppet manifest: Luke Kanies - puppetlabs.com -->
 <service_bundle type="manifest" name="puppet">
 
-  <service name="network/puppet" type="service" version="1">
+  <service name="network/puppet" type="service" version="27">
 
     <create_default_instance enabled="false"/>
     <single_instance/>
