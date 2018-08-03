@@ -1,8 +1,7 @@
 #! /usr/bin/env ruby
 require 'spec_helper'
 
-
-describe Puppet::Type.type(:service).provider(:upstart) do
+describe 'Puppet::Type::Service::Upstart', unless: Puppet::Util::Platform.jruby? do
   let(:manual) { "\nmanual" }
   let(:start_on_default_runlevels) {  "\nstart on runlevel [2,3,4,5]" }
   let(:provider_class) { Puppet::Type.type(:service).provider(:upstart) }
@@ -31,7 +30,7 @@ describe Puppet::Type.type(:service).provider(:upstart) do
   it "should be the default provider on Ubuntu" do
     Facter.expects(:value).with(:operatingsystem).returns("Ubuntu")
     Facter.expects(:value).with(:operatingsystemmajrelease).returns("12.04")
-    expect(described_class.default?).to be_truthy
+    expect(provider_class.default?).to be_truthy
   end
 
   context "upstart daemon existence confine" do
@@ -74,8 +73,8 @@ describe Puppet::Type.type(:service).provider(:upstart) do
   describe "excluding services" do
     it "ignores tty and serial on Redhat systems" do
       Facter.stubs(:value).with(:osfamily).returns('RedHat')
-      expect(described_class.excludes).to include 'serial'
-      expect(described_class.excludes).to include 'tty'
+      expect(provider_class.excludes).to include 'serial'
+      expect(provider_class.excludes).to include 'tty'
     end
   end
 

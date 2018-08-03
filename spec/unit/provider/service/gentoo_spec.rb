@@ -2,7 +2,8 @@
 
 require 'spec_helper'
 
-describe Puppet::Type.type(:service).provider(:gentoo) do
+describe 'Puppet::Type::Service::Provider::Gentoo', unless: Puppet::Util::Platform.jruby? do
+  let(:provider_class) { Puppet::Type.type(:service).provider(:gentoo) }
 
   if Puppet.features.microsoft_windows?
     # Get a pid for $CHILD_STATUS to latch on to
