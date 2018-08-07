@@ -130,9 +130,15 @@ describe klass do
       end
     end
 
-    describe "when calling hashify" do
-      it "should return the array hashified" do
-        expect(@property.hashify(["foo=baz", "bar=boo"])).to eq({ :foo => "baz", :bar => "boo" })
+    describe "when calling hashify_should" do
+      it "should return the underlying hash if the user passed in a hash" do
+        @property.should = { "foo" => "bar" }
+        expect(@property.hashify_should).to eql({ :foo => "bar" })
+      end
+
+      it "should hashify the array of key/value pairs if that is what our user passed in" do
+        @property.should = [ "foo=baz", "bar=boo" ]
+        expect(@property.hashify_should).to eq({ :foo => "baz", :bar => "boo" })
       end
     end
 
@@ -148,7 +154,6 @@ describe klass do
       end
 
       it "should return true if the passed in values is nil" do
-        @property.should = "foo"
         @property.safe_insync?(nil) == true
       end
 
@@ -164,6 +169,51 @@ describe klass do
         @property.should = ["foo=baz", "bar=boo"]
         @property.expects(:inclusive?).returns(true)
         expect(@property.safe_insync?({ "foo" => "bee", "bar" => "boo" })).to eq(false)
+      end
+    end
+
+    describe 'when validating a passed-in property value' do
+      it 'should raise a Puppet::Error if the property value is anything but a Hash or a String' do
+        expect { @property.validate(5) }.to raise_error do |error|
+          expect(error).to be_a(Puppet::Error)
+          expect(error.message).to match("specified as a hash or an array")
+        end
+      end
+
+      it 'should accept a Hash property value' do
+        @property.validate({ 'foo' => 'bar' })
+      end
+
+      it "should raise a Puppet::Error if the property value isn't a key/value pair" do
+        expect { @property.validate('foo') }.to raise_error do |error|
+          expect(error).to be_a(Puppet::Error)
+          expect(error.message).to match("separated by '='")
+        end
+      end
+
+      it 'should accept a valid key/value pair property value' do
+        @property.validate('foo=bar')
+      end
+    end
+
+    describe 'when munging a passed-in property value' do
+      it 'should return the value as-is if it is a string' do
+        expect(@property.munge('foo=bar')).to eql('foo=bar')
+      end
+
+      it 'should stringify + symbolize the keys and stringify the values if it is a hash' do
+        input = {
+          1     => 2,
+          true  => false,
+          '   foo   ' => 'bar'
+        }
+        expected_output = {
+          :'1'    => '2',
+          :true => 'false',
+          :foo  => 'bar'
+        }
+
+        expect(@property.munge(input)).to eql(expected_output)
       end
     end
   end

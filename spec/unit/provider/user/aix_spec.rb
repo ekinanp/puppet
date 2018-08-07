@@ -40,68 +40,46 @@ guest id=100 pgrp=usr groups=usr home=/home/guest
   end
 
   describe "#managed_attribute_keys" do
-    let(:existing_attributes) do
-      { :account_locked => 'false',
+    let(:input_hash) do
+      {
+        :account_locked => 'false',
         :admin => 'false',
-        :login => 'true',
+        :"  login " => 'true',
         'su' => 'true'
       }
     end
 
-    before(:each) do
-      original_parameters = { :attributes => attribute_array }
-      @resource.stubs(:original_parameters).returns(original_parameters)
+    it "should return the input_hash's keys if the attribute property is not specified" do
+      @resource.stubs(:original_parameters).returns({})
+
+      managed_attributes = @provider.managed_attribute_keys(input_hash)
+      expect(managed_attributes).to eql([:account_locked, :admin, :login, :su])
     end
 
-    describe "invoked via manifest" do
-      let(:attribute_array) { ["rlogin=false", "login =true"] }
-      let(:single_attribute_array) { "rlogin=false" }
-
-      it "should return only the keys of the attribute key=value pair from manifest" do
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        expect(keys).to be_include(:rlogin)
-        expect(keys).to be_include(:login)
-        expect(keys).not_to be_include(:su)
+    context 'when the attribute property is specified' do
+      def set_attribute_property(value)
+        @resource.stubs(:original_parameters).returns({ :attributes => value })
       end
 
-      it "should strip spaces from symbols" do
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        expect(keys).to be_include(:login)
-        expect(keys).not_to be_include(:"login ")
+      it 'returns the managed attributes if a Hash value is passed-in' do
+        set_attribute_property({ :foo => 'bar'})
+
+        managed_attributes = @provider.managed_attribute_keys(input_hash)
+        expect(managed_attributes).to eql([:foo])
       end
 
-      it "should have the same count as that from the manifest" do
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        expect(keys.size).to eq(attribute_array.size)
+      it 'returns the managed attributes if a single key/value pair is passed-in' do
+        set_attribute_property('  foo  =  bar')
+
+        managed_attributes = @provider.managed_attribute_keys(input_hash)
+        expect(managed_attributes).to eql([:foo]) 
       end
 
-      it "should convert the keys to symbols" do
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        all_symbols = keys.all? {|k| k.is_a? Symbol}
-        expect(all_symbols).to be_truthy
-      end
+      it 'returns the managed attributes if an array of key/value pairs are passed-in' do
+        set_attribute_property(['  foo  =  bar', 'baz=foo'])
 
-      it "should allow a single attribute to be specified" do
-        @resource.stubs(:original_parameters).returns({ :attributes => single_attribute_array })
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        expect(keys).to be_include(:rlogin)
-      end
-    end
-
-    describe "invoked via RAL" do
-      let(:attribute_array) { nil }
-
-      it "should return the keys in supplied hash" do
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        expect(keys).not_to be_include(:rlogin)
-        expect(keys).to be_include(:login)
-        expect(keys).to be_include(:su)
-      end
-
-      it "should convert the keys to symbols" do
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        all_symbols = keys.all? {|k| k.is_a? Symbol}
-        expect(all_symbols).to be_truthy
+        managed_attributes = @provider.managed_attribute_keys(input_hash)
+        expect(managed_attributes).to eql([:foo, :baz])
       end
     end
   end

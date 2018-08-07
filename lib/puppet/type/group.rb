@@ -161,10 +161,6 @@ module Puppet
       def delimiter
         " "
       end
-
-      validate do |value|
-        raise ArgumentError, _("Attributes value pairs must be separated by an =") unless value.include?("=")
-      end
     end
 
     newparam(:attribute_membership) do

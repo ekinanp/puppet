@@ -291,9 +291,31 @@ Puppet::Type.type(:user).provide :aix, :parent => Puppet::Provider::AixObject do
   end
 
   def managed_attribute_keys(hash)
-    managed_attributes ||= @resource.original_parameters[:attributes] || hash.keys.map{|k| k.to_s}
+    # This method's supposed to return the attributes that our current Puppet run
+    # is managing. It is either whatever was passed-in explicitly by the user or our
+    # input hash. Unfortunately, we have to call on the original passed-in value for
+    # the attributes property to get what the user specified, since the attribute
+    # property's `should` method does some internal munging depending on the attribute_membership
+    # parameter. It'd be nice to access the property object directly and call hashify_should,
+    # but we cannot do that so we must do some type-checking here ourselves. Good news is
+    # that from our validation step, we know what to expect for our user specified value.
+    #
+    # NOTE: The reason we do this is b/c the KeyValue property class' insync method
+    # compares the 'is' with the 'should' value. The provider's 'is' value collects
+    # all of the system attributes, so we want to filter out the ones that correspond
+    # to 'should' so that we correctly return syncd or not in sync. We really should
+    # override the user type's attribute property's 'should' method to properly do
+    # the comparison. I.e. These methods should not even be necessary.
+    managed_attributes = @resource.original_parameters[:attributes] || hash
+    if managed_attributes.is_a?(Hash)
+      return managed_attributes.keys.map { |key| key.to_s.strip.to_sym }
+    end
+
+    # Else we have a single Key/Value pair or an array of them.
     managed_attributes = [managed_attributes] unless managed_attributes.is_a?(Array)
-    managed_attributes.map {|attr| key, _ = attr.split("="); key.strip.to_sym}
+    managed_attributes.map do |attribute|
+      attribute.split("=").first.strip.to_sym
+    end
   end
 
   def should_include?(key, managed_keys)

@@ -610,10 +610,6 @@ module Puppet
       def membership
         :key_membership
       end
-
-      validate do |value|
-        raise ArgumentError, _("Key/value pairs must be separated by an =") unless value.include?("=")
-      end
     end
 
     newparam(:key_membership) do
@@ -643,10 +639,6 @@ module Puppet
 
       def delimiter
         " "
-      end
-
-      validate do |value|
-        raise ArgumentError, _("Attributes value pairs must be separated by an =") unless value.include?("=")
       end
     end
 
