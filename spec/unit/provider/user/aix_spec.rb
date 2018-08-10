@@ -1,169 +1,219 @@
 require 'spec_helper'
 
-provider_class = Puppet::Type.type(:user).provider(:aix)
+describe 'Puppet::Type::User::Provider::Aix' do
+  let(:provider_class) { Puppet::Type.type(:user).provider(:aix) }
+  let(:group_provider_class) { Puppet::Type.type(:group).provider(:aix) }
 
-describe provider_class do
-
-  let(:lsuser_all_example) do
-    <<-OUTPUT
-root id=0 pgrp=system groups=system,bin,sys,security,cron,audit,lp home=/root shell=/usr/bin/bash auditclasses=general login=true su=true rlogin=true daemon=true admin=true sugroups=ALL admgroups=lolt,allstaff tpath=nosak ttys=ALL expires=0 auth1=SYSTEM auth2=NONE umask=22 registry=files SYSTEM=compat logintimes= loginretries=0 pwdwarntime=0 account_locked=false minage=0 maxage=0 maxexpired=-1 minalpha=0 minother=0 mindiff=0 maxrepeats=8 minlen=0 histexpire=0 histsize=0 pwdchecks= dictionlist= default_roles= fsize=2097151 cpu=-1 data=262144 stack=65536 core=2097151 rss=65536 nofiles=2000 time_last_login=1358465855 time_last_unsuccessful_login=1358378454 tty_last_login=ssh tty_last_unsuccessful_login=ssh host_last_login=rpm-builder.puppetlabs.lan host_last_unsuccessful_login=192.168.100.78 unsuccessful_login_count=0 roles=
-guest id=100 pgrp=usr groups=usr home=/home/guest login=true su=true rlogin=true daemon=true admin=false sugroups=ALL admgroups= tpath=nosak ttys=ALL expires=0 auth1=SYSTEM auth2=NONE umask=22 registry=files SYSTEM=compat logintimes= loginretries=0 pwdwarntime=0 account_locked=false minage=0 maxage=0 maxexpired=-1 minalpha=0 minother=0 mindiff=0 maxrepeats=8 minlen=0 histexpire=0 histsize=0 pwdchecks= dictionlist= default_roles= fsize=2097151 cpu=-1 data=262144 stack=65536 core=2097151 rss=65536 nofiles=2000 roles=
-    OUTPUT
+  let(:resource) do
+    Puppet::Type.type(:user).new(
+      :name   => 'test_aix_user',
+      :ensure => :present
+    )
+  end
+  let(:provider) do
+    provider_class.new(resource)
   end
 
-  let(:lsgroup_all_example) do
-    <<-OUTPUT
-root id=0 pgrp=system groups=system,bin,sys,security,cron,audit,lp home=/root shell=/usr/bin/bash
-guest id=100 pgrp=usr groups=usr home=/home/guest
-    OUTPUT
+  describe '.pgrp_to_gid' do
+    let!(:groups) do
+      objects = {
+        'group1' => 1,
+        'group2' => 2
+      }
+
+      group_provider_class.stubs(:list_all).returns(objects)
+
+      objects
+    end
+
+    it 'raises an ArgumentError if the specified pgrp does not exist' do
+      expect { provider_class.pgrp_to_gid('foo') }.to raise_error do |error|
+        expect(error).to be_a(ArgumentError)
+
+        expect(error.message).to match("FATAL")
+      end
+    end
+
+    it 'returns the gid of the pgrp' do
+      expect(provider_class.pgrp_to_gid('group1')).to eql(1)
+    end
   end
 
-  before do
-    @resource = stub('resource')
-    @provider = provider_class.new(@resource)
+  describe 'gid_to_pgrp' do
+    let!(:groups) do
+      objects = {
+        'group1' => 1,
+        'group2' => 2
+      }
+
+      group_provider_class.stubs(:list_all).returns(objects)
+
+      objects
+    end
+
+    it 'raises an ArgumentError if the specified gid does not exist' do
+      expect { provider_class.gid_to_pgrp(3) }.to raise_error do |error|
+        expect(error).to be_a(ArgumentError)
+
+        expect(error.message).to match("3")
+      end
+    end
+
+    it 'returns the pgrp of the gid when the gid is a String' do
+      expect(provider_class.gid_to_pgrp('group1')).to eql('group1')
+    end
+
+    it 'returns the pgrp of the gid when the gid is an Integer' do
+      expect(provider_class.gid_to_pgrp(1)).to eql('group1')
+    end
   end
 
-  it "should be able to return a group name based on a group ID" do
-    @provider.stubs(:lsgroupscmd)
+  describe '.expires_to_expiry' do
+    it 'returns absent if expires is 0' do
+      expect(provider_class.expires_to_expiry('0')).to eql(:absent)
+    end
 
-    @provider.stubs(:execute).returns(lsgroup_all_example)
+    # TODO (PUP-9049): Remove this test if it is unnecessary
+    it 'returns absent if the expiry attribute is not formatted properly' do
+      expect(provider_class.expires_to_expiry('bad_format')).to eql(:absent)
+    end
 
-    expect(@provider.groupname_by_id(100)).to eq('guest')
+    it 'returns the password expiration date' do
+      expect(provider_class.expires_to_expiry('0910122314')).to eql('2014-09-10')
+    end
   end
 
-  it "should be able to list all users" do
-    provider_class.stubs(:command)
+  describe '.expiry_to_expires' do
+    it 'returns 0 if the expiry date is 0000-00-00' do
+      expect(provider_class.expiry_to_expires('0000-00-00')).to eql('0')
+    end
 
-    provider_class.stubs(:execute).returns(lsuser_all_example)
+    it 'returns 0 if the expiry date is "absent"' do
+      expect(provider_class.expiry_to_expires('absent')).to eql('0')
+    end
 
-    expect(provider_class.list_all).to eq(['root', 'guest'])
+    it 'returns 0 if the expiry date is :absent' do
+      expect(provider_class.expiry_to_expires(:absent)).to eql('0')
+    end
+
+    it 'returns the expires attribute value' do
+      expect(provider_class.expiry_to_expires('2014-09-10')).to eql('0910000014')
+    end
   end
 
-  describe "#managed_attribute_keys" do
-    let(:existing_attributes) do
-      { :account_locked => 'false',
-        :admin => 'false',
-        :login => 'true',
-        'su' => 'true'
+  describe '.groups_to_groups' do
+    it 'raises an ArgumentError if the groups are space-separated' do
+      groups = "foo bar baz"
+      expect { provider_class.groups_to_groups(groups) }.to raise_error do |error|
+        expect(error).to be_a(ArgumentError)
+
+        expect(error.message).to match(groups)
+        expect(error.message).to match("Groups")
+      end
+    end
+  end
+
+  describe '#password' do
+    before(:each) do
+      @filesystem_open = Puppet::FileSystem.method(:open)
+
+      # Not the preferred way to mock out Puppet::FileSystem.open, but Mocha
+      # unfortunately does not let you compute dynamic return values. It's not
+      # bad enough to justify an acceptance test, however. Note that we are explicit
+      # with our arguments because the #password function explicitly calls
+      # Puppet::FileSystem.open with three arguments.
+      module Puppet::FileSystem
+        def self.open(path, arg2, arg3, &block)
+          unless path == "/etc/security/passwd"
+            raise "Puppet::FileSystem.open is only mocked for /etc/security/passwd!"
+          end
+          path = my_fixture('aix_passwd_file.out')
+          File.open(path) { |f| block.call(f) }
+        end
+      end
+    end
+
+    # Reset Puppet::FileSystem to what it was before these tests.
+    after(:each) do
+      module Puppet::FileSystem
+        def self.open(arg1, arg2, arg3, &block)
+          @filesystem_open.call(arg1, arg2, arg3, &block)
+        end
+      end
+    end
+
+    it "returns :absent if the user stanza doesn't exist" do
+      resource[:name] = 'nonexistent_user'
+      expect(provider.password).to eql(:absent)
+    end
+
+    it "returns absent if the user does not have a password" do
+      resource[:name] = 'no_password_user'
+      expect(provider.password).to eql(:absent)
+    end
+
+    it "returns the user's password" do
+      expect(provider.password).to eql('some_password')
+    end
+  end
+
+  describe '#password=' do
+    let(:mock_tempfile) do
+      mock_tempfile_obj = mock()
+      mock_tempfile_obj.stubs(:<<)
+      mock_tempfile_obj.stubs(:close)
+      mock_tempfile_obj.stubs(:delete)
+      mock_tempfile_obj.stubs(:path).returns('tempfile_path')
+
+      Tempfile.stubs(:new)
+        .with("puppet_#{provider.name}_pw", :encoding => Encoding::ASCII)
+        .returns(mock_tempfile_obj)
+
+      mock_tempfile_obj
+    end
+    let(:cmd) do
+      [provider.class.command(:chpasswd), *provider.ia_module_args, '-e', '-c']
+    end
+    let(:execute_options) do
+      {
+        :failonfail => false,
+        :combine => true,
+        :stdinfile => mock_tempfile.path
       }
     end
 
-    before(:each) do
-      original_parameters = { :attributes => attribute_array }
-      @resource.stubs(:original_parameters).returns(original_parameters)
-    end
-
-    describe "invoked via manifest" do
-      let(:attribute_array) { ["rlogin=false", "login =true"] }
-      let(:single_attribute_array) { "rlogin=false" }
-
-      it "should return only the keys of the attribute key=value pair from manifest" do
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        expect(keys).to be_include(:rlogin)
-        expect(keys).to be_include(:login)
-        expect(keys).not_to be_include(:su)
-      end
-
-      it "should strip spaces from symbols" do
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        expect(keys).to be_include(:login)
-        expect(keys).not_to be_include(:"login ")
-      end
-
-      it "should have the same count as that from the manifest" do
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        expect(keys.size).to eq(attribute_array.size)
-      end
-
-      it "should convert the keys to symbols" do
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        all_symbols = keys.all? {|k| k.is_a? Symbol}
-        expect(all_symbols).to be_truthy
-      end
-
-      it "should allow a single attribute to be specified" do
-        @resource.stubs(:original_parameters).returns({ :attributes => single_attribute_array })
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        expect(keys).to be_include(:rlogin)
+    it 'raises a Puppet::Error if chpasswd fails' do
+      provider.stubs(:execute).with(cmd, execute_options).returns("failed to change passwd!")
+      expect { provider.password = 'foo' }.to raise_error do |error|
+        expect(error).to be_a(Puppet::Error)
+        expect(error.message).to match("failed to change passwd!")
       end
     end
 
-    describe "invoked via RAL" do
-      let(:attribute_array) { nil }
+    it "changes the user's password" do
+      provider.expects(:execute).with(cmd, execute_options).returns("")
+      provider.password = 'foo'
+    end
 
-      it "should return the keys in supplied hash" do
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        expect(keys).not_to be_include(:rlogin)
-        expect(keys).to be_include(:login)
-        expect(keys).to be_include(:su)
-      end
+    it "closes and deletes the tempfile" do
+      provider.stubs(:execute).with(cmd, execute_options).returns("")
 
-      it "should convert the keys to symbols" do
-        keys = @provider.managed_attribute_keys(existing_attributes)
-        all_symbols = keys.all? {|k| k.is_a? Symbol}
-        expect(all_symbols).to be_truthy
-      end
+      mock_tempfile.expects(:close).times(2)
+      mock_tempfile.expects(:delete)
+
+      provider.password = 'foo'
     end
   end
 
-  describe "#should_include?" do
-    it "should exclude keys translated into something else" do
-      managed_keys = [:rlogin]
-      @provider.class.attribute_mapping_from.stubs(:include?).with(:rlogin).returns(true)
-      @provider.class.stubs(:attribute_ignore).returns([])
-      expect(@provider.should_include?(:rlogin, managed_keys)).to be_falsey
-    end
+  describe '#create' do
+    it 'should create the user' do
+      provider.resource.stubs(:should).with(anything).returns(nil)
+      provider.resource.stubs(:should).with(:password).returns('password')
 
-    it "should exclude keys explicitly ignored" do
-      managed_keys = [:rlogin]
-      @provider.class.attribute_mapping_from.stubs(:include?).with(:rlogin).returns(false)
-      @provider.class.stubs(:attribute_ignore).returns([:rlogin])
-      expect(@provider.should_include?(:rlogin, managed_keys)).to be_falsey
-    end
+      provider.expects(:execute)
+      provider.expects(:password=).with('password')
 
-    it "should exclude keys not specified in manifest" do
-      managed_keys = [:su]
-      @provider.class.attribute_mapping_from.stubs(:include?).with(:rlogin).returns(false)
-      @provider.class.stubs(:attribute_ignore).returns([])
-      expect(@provider.should_include?(:rlogin, managed_keys)).to be_falsey
-    end
-
-    it "should include keys specified in manifest if not translated or ignored" do
-      managed_keys = [:rlogin]
-      @provider.class.attribute_mapping_from.stubs(:include?).with(:rlogin).returns(false)
-      @provider.class.stubs(:attribute_ignore).returns([])
-      expect(@provider.should_include?(:rlogin, managed_keys)).to be_truthy
-    end
-  end
-  describe "when handling passwords" do
-    let(:passwd_without_spaces) do
-        # from http://pic.dhe.ibm.com/infocenter/aix/v7r1/index.jsp?topic=%2Fcom.ibm.aix.files%2Fdoc%2Faixfiles%2Fpasswd_security.htm
-        <<-OUTPUT
-smith:
-  password = MGURSj.F056Dj
-  lastupdate = 623078865
-  flags = ADMIN,NOCHECK
-        OUTPUT
-    end
-
-    let(:passwd_with_spaces) do
-        # add trailing space to the password
-        passwd_without_spaces.gsub(/password = (.*)/, 'password = \1   ')
-    end
-
-
-    it "should be able to read the hashed password" do
-      @provider.stubs(:open_security_passwd).returns(StringIO.new(passwd_without_spaces))
-      @resource.stubs(:[]).returns('smith')
-
-      expect(@provider.password).to eq('MGURSj.F056Dj')
-    end
-
-    it "should be able to read the hashed password, even with trailing spaces" do
-      @provider.stubs(:open_security_passwd).returns(StringIO.new(passwd_with_spaces))
-      @resource.stubs(:[]).returns('smith')
-
-      expect(@provider.password).to eq('MGURSj.F056Dj')
+      provider.create
     end
   end
 end
