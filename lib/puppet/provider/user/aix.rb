@@ -141,6 +141,32 @@ Puppet::Type.type(:user).provide :aix, :parent => Puppet::Provider::AixObject do
   # properties + a getter for the attributes property).
   mk_resource_methods
 
+  # Helper function that parses the password from the given
+  # password filehandle. This is here to make testing easier
+  # since we cannot configure Mocha to mock out a method and
+  # have it return a block's value, meaning we cannot test
+  # #password directly (not in a simple and obvious way, at least).
+  # @api private
+  def parse_password(f)
+    # From the docs, a user stanza is formatted as (newlines are explicitly stated for clarity):
+    #   <user>:\n
+    #     <attribute1>=<value1>\n
+    #     <attribute2>=<value2>\n
+    #   \n
+    #
+    # The fact that each stanza ends with an additional newline significantly
+    # simplifies the code here because we can split at that additional newline,
+    # effectively parsing each stanza.
+    stanza = f.read.split(/^$\n/).find { |stanza| stanza =~ /\A#{@resource[:name]}:/ }
+    return :absent unless stanza
+
+    # Now find the password, if it exists
+    match_obj = /password\s*=\s*(\S*)$/.match(stanza)
+    return :absent unless match_obj
+
+    match_obj[1]
+  end
+
   #- **password**
   #    The user's password, in whatever encrypted format the local machine
   #    requires. Be sure to enclose any value that includes a dollar sign ($)
@@ -151,23 +177,7 @@ Puppet::Type.type(:user).provide :aix, :parent => Puppet::Provider::AixObject do
     # AIX reference indicates this file is ASCII
     # https://www.ibm.com/support/knowledgecenter/en/ssw_aix_72/com.ibm.aix.files/passwd_security.htm
     Puppet::FileSystem.open("/etc/security/passwd", nil, "r:ASCII") do |f|
-      # From the docs, a user stanza is formatted as (newlines are explicitly stated for clarity):
-      #   <user>:\n
-      #     <attribute1>=<value1>\n
-      #     <attribute2>=<value2>\n
-      #   \n
-      #
-      # The fact that each stanza ends with an additional newline significantly
-      # simplifies the code here because we can split at that additional newline,
-      # effectively parsing each stanza.
-      stanza = f.read.split(/^$\n/).find { |stanza| stanza =~ /\A#{@resource[:name]}:/ }
-      next :absent unless stanza
-
-      # Now find the password, if it exists
-      match_obj = /password\s*=\s*(\S*)$/.match(stanza)
-      next :absent unless match_obj
-
-      match_obj[1]
+      parse_password(f)
     end
   end
 

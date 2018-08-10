@@ -113,48 +113,32 @@ describe 'Puppet::Type::User::Provider::Aix' do
     end
   end
 
-  describe '#password' do
-    before(:each) do
-      @filesystem_open = Puppet::FileSystem.method(:open)
-
-      # Not the preferred way to mock out Puppet::FileSystem.open, but Mocha
-      # unfortunately does not let you compute dynamic return values. It's not
-      # bad enough to justify an acceptance test, however. Note that we are explicit
-      # with our arguments because the #password function explicitly calls
-      # Puppet::FileSystem.open with three arguments.
-      module Puppet::FileSystem
-        def self.open(path, arg2, arg3, &block)
-          unless path == "/etc/security/passwd"
-            raise "Puppet::FileSystem.open is only mocked for /etc/security/passwd!"
-          end
-          path = my_fixture('aix_passwd_file.out')
-          File.open(path) { |f| block.call(f) }
-        end
-      end
-    end
-
-    # Reset Puppet::FileSystem to what it was before these tests.
-    after(:each) do
-      module Puppet::FileSystem
-        def self.open(arg1, arg2, arg3, &block)
-          @filesystem_open.call(arg1, arg2, arg3, &block)
-        end
+  describe '#parse_password' do
+    def call_parse_password
+      File.open(my_fixture('aix_passwd_file.out')) do |f|
+        provider.parse_password(f)
       end
     end
 
     it "returns :absent if the user stanza doesn't exist" do
       resource[:name] = 'nonexistent_user'
-      expect(provider.password).to eql(:absent)
+      expect(call_parse_password).to eql(:absent)
     end
 
     it "returns absent if the user does not have a password" do
       resource[:name] = 'no_password_user'
-      expect(provider.password).to eql(:absent)
+      expect(call_parse_password).to eql(:absent)
     end
 
     it "returns the user's password" do
-      expect(provider.password).to eql('some_password')
+      expect(call_parse_password).to eql('some_password')
     end
+  end
+
+  # TODO: If we move from using Mocha to rspec's mocks,
+  # or a better and more robust mocking library, we should
+  # remove #parse_password and copy over its tests to here.
+  describe '#password' do
   end
 
   describe '#password=' do
