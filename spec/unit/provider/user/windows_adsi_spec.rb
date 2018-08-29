@@ -2,6 +2,11 @@
 
 require 'spec_helper'
 
+# TODO: Some of these tests test dependencies that are beyond the scope
+# of unit tests. For example, there's a lot of ADSI::User mocking going
+# on. At some point, these should either be moved to integration tests,
+# refactored to conform more to unit test standards, or be removed
+# entirely.
 describe Puppet::Type.type(:user).provider(:windows_adsi), :if => Puppet.features.microsoft_windows? do
   let(:resource) do
     Puppet::Type.type(:user).new(
@@ -14,6 +19,15 @@ describe Puppet::Type.type(:user).provider(:windows_adsi), :if => Puppet.feature
   let(:provider) { resource.provider }
 
   let(:connection) { stub 'connection' }
+
+  def stub_attributes(attributes)
+    resource[:attributes] = attributes
+
+    # When referencing resource[:attributes] in the provider code,
+    # we reference the #should method of the attributes property.
+    # This calls our getter, which is why we need to stub it here.
+    provider.stubs(:attributes).returns(attributes) 
+  end
 
   before :each do
     Puppet::Util::Windows::ADSI.stubs(:computer_name).returns('testcomputername')
@@ -32,6 +46,22 @@ describe Puppet::Type.type(:user).provider(:windows_adsi), :if => Puppet.feature
     end
   end
 
+  describe ".unmunge_boolean" do
+    it "unmunges 'true' to true" do
+      expect(described_class.unmunge_boolean('true')).to be true
+    end
+
+    it "unmunges 'false' to false" do
+      expect(described_class.unmunge_boolean('false')).to be false
+    end
+
+    it "raises an ArgumentError if the string is not a boolean value" do
+      expect { described_class.unmunge_boolean('bad') }.to raise_error(
+        ArgumentError, /bad.*Boolean value.*'true'.*'false'/
+      )
+    end
+  end
+
   it "should provide access to a Puppet::Util::Windows::ADSI::User object" do
     expect(provider.user).to be_a(Puppet::Util::Windows::ADSI::User)
   end
@@ -42,6 +72,155 @@ describe Puppet::Type.type(:user).provider(:windows_adsi), :if => Puppet.feature
         resource.stubs(:[]).with(any_of(:name, :password)).returns(nil)
         Puppet::Util::Windows::User.expects(:logon_user).never
         provider.password
+      end
+    end
+  end
+
+  describe '#password=' do
+    before(:each) do
+      provider.user.stubs(:password=)
+    end
+
+    it "should set the user's password" do
+      provider.user.expects(:password=).with('password')
+
+      provider.stubs(:attributes=)
+
+      provider.password = 'password'
+    end
+
+    it "should set the user's password to never expire by default" do
+      provider.expects(:attributes=).with(
+        has_entries(password_never_expires: 'true')
+      )
+
+      provider.password = 'password'
+    end
+
+    it "should not override the password_never_expires attribute, if provided" do
+      stub_attributes(password_never_expires: 'false')
+
+      provider.expects(:attributes=).with(
+        has_entries(password_never_expires: 'false')
+      )
+
+      provider.password = 'password'
+    end
+
+    it "should also set the user attributes after changing the password" do
+      attributes = {
+        account_disabled: 'true',
+        full_name: 'Johnny',
+        password_never_expires: 'true'
+      }
+      stub_attributes(attributes)
+
+      provider.expects(:attributes=).with(attributes)
+
+      provider.password = 'password'
+    end
+  end
+
+  describe '#attributes' do
+    it 'should collect the current attributes on the system' do
+      set_userflags   = [ :ADS_UF_ACCOUNTDISABLE, :ADS_UF_PASSWD_CANT_CHANGE ]
+      unset_userflags = [ :ADS_UF_PASSWORD_EXPIRED, :ADS_UF_DONT_EXPIRE_PASSWD ]
+
+      set_userflags.each do |flag|
+        provider.user.stubs(:userflag_set?).with(flag).returns(true)
+      end
+      unset_userflags.each do |flag|
+        provider.user.stubs(:userflag_set?).with(flag).returns(false)
+      end
+      provider.user.stubs(:[]).with('FullName').returns('Johnny')
+
+      expect(provider.attributes).to eql(
+        {
+          full_name: 'Johnny',
+          account_disabled: 'true',
+          password_change_required: 'false',
+          password_change_not_allowed: 'true',
+          password_never_expires: 'false'
+        }
+      )
+    end
+  end
+
+  describe '#check_combinations' do
+    # Note that this method expects the attributes
+    # to be munged.
+    let(:default_attributes) do
+      {
+        full_name: 'Johnny',
+        account_disabled: true,
+        password_change_required: false,
+        password_change_not_allowed: false,
+        password_never_expires: false
+      }
+    end
+
+    shared_examples 'an invalid combination' do |combination, reason|
+      context "when the passed-in attributes contains the #{combination} combination" do
+        let(:combination_str) do
+          combination.map do |attribute, value|
+            "#{attribute}=#{value}"
+          end.join(', ')
+        end
+        let(:attributes) { default_attributes.merge(combination) }
+  
+        it "raises an ArgumentError" do
+          expect { provider.check_combinations(attributes) }.to raise_error(
+            ArgumentError, /#{combination_str}.*#{reason}/
+          )
+        end
+      end
+    end
+
+    described_class::ATTRIBUTES_INVALID_COMBINATIONS.each do |(combination, reason)|
+      include_examples 'an invalid combination', combination, reason
+    end
+
+    it 'passes-through when the passed-in attribute values make sense' do
+      provider.check_combinations(default_attributes)
+    end
+  end
+
+  describe "#validate_and_unmunge" do
+    context 'validation' do
+
+      it "should not accept keys that aren't a part of the schema" do
+        expect do
+          described_class.new(:name => username, :windows_attributes => { 'some_key' => 'some_value' })
+        end.to raise_error(
+          Puppet::Error,
+          /account_disabled, full_name, password_change_not_allowed, password_never_expires/
+        )
+      end
+
+      shared_examples 'type error' do |key, expected_type, bad_value|
+        it "should error when the #{key} key is not a #{expected_type} value" do
+          expect do
+            described_class.new(:name => username, :windows_attributes => { key => bad_value })
+          end.to raise_error(
+            Puppet::Error,
+            /#{key}.*#{expected_type}/
+          )
+        end
+      end
+
+      include_examples 'type error', 'account_disabled', 'Boolean', 'string'
+      include_examples 'type error', 'full_name', 'String', true
+      include_examples 'type error', 'password_change_not_allowed', 'Boolean', 'string'
+      include_examples 'type error', 'password_never_expires', 'Boolean', 'string'
+
+      it 'should accept input that specifies values for only some of these other properties' do
+        described_class.new(
+          :name => username,
+          :windows_attributes => {
+            'account_disabled' => true,
+            'full_name'        => 'Johnny'
+          }
+        )
       end
     end
   end
@@ -191,6 +370,14 @@ describe Puppet::Type.type(:user).provider(:windows_adsi), :if => Puppet.feature
       resource[:comment]    = 'a test user'
       resource[:home]       = 'C:\Users\testuser'
 
+      stub_attributes({ account_disabled: 'true' })
+
+      # provider.password= should invoke this
+      provider.expects(:attributes=).with({ :account_disabled => 'true', :password_never_expires => 'true' })
+
+      # this should be invoked later in create
+      provider.expects(:attributes=).with(resource[:attributes])
+
       user = stub 'user'
       Puppet::Util::Windows::ADSI::User.expects(:create).with('testuser').returns user
 
@@ -198,7 +385,6 @@ describe Puppet::Type.type(:user).provider(:windows_adsi), :if => Puppet.feature
 
       create = sequence('create')
       user.expects(:password=).in_sequence(create)
-      user.expects(:commit).in_sequence(create)
       user.expects(:set_groups).with('group1,group2', false).in_sequence(create)
       user.expects(:[]=).with('Description', 'a test user')
       user.expects(:[]=).with('HomeDirectory', 'C:\Users\testuser')
@@ -210,17 +396,13 @@ describe Puppet::Type.type(:user).provider(:windows_adsi), :if => Puppet.feature
       resource[:password] = '0xDeadBeef'
       resource[:managehome] = true
 
+      provider.stubs(:password=)
+
       user = stub_everything 'user'
       Puppet::Util::Windows::ADSI::User.expects(:create).with('testuser').returns user
       Puppet::Util::Windows::User.expects(:load_profile).with('testuser', '0xDeadBeef')
 
       provider.create
-    end
-
-    it "should set a user's password" do
-      provider.user.expects(:password=).with('plaintextbad')
-
-      provider.password = "plaintextbad"
     end
 
     it "should test a valid user password" do
@@ -253,10 +435,12 @@ describe Puppet::Type.type(:user).provider(:windows_adsi), :if => Puppet.feature
 
     it "should fail with an actionable message when trying to create an active directory user" do
       resource[:name] = 'DOMAIN\testdomainuser'
+
       Puppet::Util::Windows::ADSI::Group.expects(:exists?).with(resource[:name]).returns(false)
       connection.expects(:Create)
-      connection.expects(:Get).with('UserFlags')
-      connection.expects(:Put).with('UserFlags', true)
+      connection.stubs(:Get)
+      connection.stubs(:Get).with('UserFlags').returns(0)
+      connection.stubs(:Put)
       connection.expects(:SetInfo).raises( WIN32OLERuntimeError.new("(in OLE method `SetInfo': )\n    OLE error code:8007089A in Active Directory\n      The specified username is invalid.\r\n\n    HRESULT error code:0x80020009\n      Exception occurred."))
 
       expect{ provider.create }.to raise_error(

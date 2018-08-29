@@ -5,7 +5,16 @@ require 'spec_helper'
 describe Puppet::Type.type(:user) do
   before :each do
     @provider_class = described_class.provide(:simple) do
-      has_features :manages_expiry, :manages_password_age, :manages_passwords, :manages_solaris_rbac, :manages_shell
+      features = [
+        :manages_expiry,
+        :manages_password_age,
+        :manages_passwords,
+        :manages_solaris_rbac,
+        :manages_shell
+      ]
+      features.push(:manages_windows_users) if Puppet.features.microsoft_windows?
+      has_features *features
+
       mk_resource_methods
       def create; end
       def delete; end
@@ -554,6 +563,54 @@ describe Puppet::Type.type(:user) do
             user_name == "test_user_name"
           }).to be_empty
         end
+      end
+    end
+  end
+
+  describe 'when managing windows_attributes', :if => Puppet.features.microsoft_windows? do
+    let(:username) { 'test_user_name' }
+
+    context 'validation' do
+      it 'should only accept a Hash value' do
+        expect { described_class.new(:name => username, :windows_attributes => 'not a hash') }.to raise_error(
+          Puppet::Error,
+          /must be specified as a hash/
+        )
+      end
+
+      it "should not accept keys that aren't a part of the schema" do
+        expect do
+          described_class.new(:name => username, :windows_attributes => { 'some_key' => 'some_value' })
+        end.to raise_error(
+          Puppet::Error,
+          /account_disabled, full_name, password_change_not_allowed, password_never_expires/
+        )
+      end
+
+      shared_examples 'type error' do |key, expected_type, bad_value|
+        it "should error when the #{key} key is not a #{expected_type} value" do
+          expect do
+            described_class.new(:name => username, :windows_attributes => { key => bad_value })
+          end.to raise_error(
+            Puppet::Error,
+            /#{key}.*#{expected_type}/
+          )
+        end
+      end
+
+      include_examples 'type error', 'account_disabled', 'Boolean', 'string'
+      include_examples 'type error', 'full_name', 'String', true
+      include_examples 'type error', 'password_change_not_allowed', 'Boolean', 'string'
+      include_examples 'type error', 'password_never_expires', 'Boolean', 'string'
+
+      it 'should accept input that specifies values for only some of these other properties' do
+        described_class.new(
+          :name => username,
+          :windows_attributes => {
+            'account_disabled' => true,
+            'full_name'        => 'Johnny'
+          }
+        )
       end
     end
   end
