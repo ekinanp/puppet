@@ -61,6 +61,9 @@ module Puppet
     feature :manages_loginclass,
       "The provider can manage the login class for a user."
 
+    feature :manages_windows_users,
+      "The provider can manage Windows users."
+
     newproperty(:ensure, :parent => Puppet::Property::Ensure) do
       newvalue(:present, :event => :user_created) do
         provider.create
@@ -644,6 +647,18 @@ module Puppet
       newvalues(:inclusive, :minimum)
 
       defaultto :minimum
+    end
+
+    # TODO: Maybe have this derive from the KeyValue property class? We can override
+    # inclusive => false, we can set log_only_changed_keys. Yeah this seems better.
+    # Let's work off 5.5.x instead.
+    newproperty(:other_properties, :required_features => :manages_windows_users) do
+      desc "Specify a hash of other properties specific to Windows users. This hash
+            must only contain the following keys with the following value types:
+                * account_disabled            => <boolean>
+                * full_name                   => <string>
+                * password_change_not_allowed => <boolean>
+                * password_never_expires      => <boolean>" 
     end
 
     newproperty(:salt, :required_features => :manages_password_salt) do
