@@ -6,7 +6,100 @@ Puppet::Type.type(:user).provide :windows_adsi do
   defaultfor :operatingsystem => :windows
   confine    :operatingsystem => :windows
 
-  has_features :manages_homedir, :manages_passwords
+  has_features :manages_homedir,
+               :manages_passwords,
+               :manages_attributes
+
+  class << self
+    # Unlike our AIX attributes, our Windows attributes have a
+    # fixed schema. Because the :attributes property munges values
+    # to their string representation, we need to unmunge them here
+    # when setting these values. Thus, this schema is a hash of
+    #     <attribute> => <unmunge function>
+    #
+    # See #validate_and_unmunge
+    attr_reader :attributes_schema
+    
+    # This hash is used in the 'attributes' property
+    # to figure out which userflag a given attribute maps to.
+    attr_reader :userflags
+
+    def attribute(info = {})
+      info[:unmunge_fn] ||= lambda { |x| x }
+
+      @attributes_schema ||= {}
+      @attributes_schema[info[:name]] = info[:unmunge_fn]
+    end
+
+    def userflag_attribute(info = {})
+      @userflags ||= {}
+      @userflags[info[:name]] = info.delete(:flag)
+
+      info[:unmunge_fn] = method(:unmunge_boolean)
+      attribute(info)
+    end
+
+    def unmunge_boolean(str)
+      return true if str == 'true'
+      return false if str == 'false'
+      raise ArgumentError, _("'%{str}' is not a Boolean value! Boolean values are 'true' or 'false'") % { str: str }
+    end
+  end
+
+  # It would be great if we could manage the password_never_expires
+  # and password_change_required attributes. Doing so would make our User
+  # resource identical to DSC's User resource. We do not yet do this now,
+  # however, because our User resource sets password_never_expires to always
+  # be true whenever we create a User or set a new password on them.
+  # If password_never_expires is true, then password_change_required can never
+  # be set to true because doing so involves setting the ADS_UF_PASSWORD_EXPIRED
+  # flag (i.e. expiring the User's current password). DSC's User resource manages
+  # password_never_expires separately from the password property, which is why they
+  # can manage these two attributes.
+  #
+  # We can do the same thing on our end. Existing customers who want their passwords
+  # to never expire would just have to set password_never_expires to true when specifying
+  # the attributes property in all of their manifests whenever they're creating a new user
+  # or changing an existing user's password.
+  #
+  # Refer to https://docs.microsoft.com/en-us/powershell/dsc/userresource
+  # for more details on DSC's User resource.
+  #
+  # We can also manage many more attributes than what's listed here. All of
+  # the userflags can probably be individually managed. See
+  #   https://docs.microsoft.com/en-us/windows/desktop/api/iads/ne-iads-ads_user_flag
+  #
+  # We can also manage the AccountExpirationDate
+
+  attribute name: :full_name
+
+  userflag_attribute name: :account_disabled,
+                     flag: :ADS_UF_ACCOUNTDISABLE
+
+  userflag_attribute name: :password_change_not_allowed,
+                     flag: :ADS_UF_PASSWD_CANT_CHANGE
+
+  def managed_attributes
+    self.class.attributes_schema.keys
+  end
+
+  def unmunge_attribute(attribute, str_value)
+    unmunge = self.class.attributes_schema[attribute]
+
+    begin
+      [attribute, unmunge.call(str_value)] 
+    rescue ArgumentError => e
+      raise ArgumentError, _("Failed to unmunge the %{attribute} attribute's value from its string representation. Detail: %{detail}") % { attribute: attribute, detail: e }
+    end
+  end
+
+  def userflag_attributes
+    self.class.userflags.keys
+  end
+
+  def userflag_of(attribute)
+    self.class.userflags[attribute]
+  end
 
   def initialize(value={})
     super(value)
@@ -66,10 +159,9 @@ Puppet::Type.type(:user).provide :windows_adsi do
 
   def create
     @user = Puppet::Util::Windows::ADSI::User.create(@resource[:name])
-    @user.password = @resource[:password]
-    @user.commit
+    self.password = @resource[:password]
 
-    [:comment, :home, :groups].each do |prop|
+    [:comment, :home, :groups, :attributes].each do |prop|
       send("#{prop}=", @resource[prop]) if @resource[prop]
     end
 
@@ -125,6 +217,7 @@ Puppet::Type.type(:user).provide :windows_adsi do
 
   def password=(value)
     user.password = value
+    user.set_userflags(:ADS_UF_DONT_EXPIRE_PASSWD)
   end
 
   def uid
@@ -133,6 +226,54 @@ Puppet::Type.type(:user).provide :windows_adsi do
 
   def uid=(value)
     fail "uid is read-only"
+  end
+
+  def attributes
+    attributes_hash = {}
+    attributes_hash[:full_name] = user['FullName']
+
+    # The remaining attributes are mapped to userflags
+    userflag_attributes.each do |attribute|
+      flag = userflag_of(attribute)
+
+      # We need to stringify our values b/c that's what the
+      # KeyValue property class expects.
+      attributes_hash[attribute] = user.userflag_set?(flag).to_s
+    end
+
+    attributes_hash
+  end
+
+  def validate_and_unmunge(new_attributes)
+    unmanaged_attributes = new_attributes.keys.reject { |attribute| managed_attributes.include?(attribute) }
+    unless unmanaged_attributes.empty?
+      raise ArgumentError, _("Cannot manage the %{unmanaged_attributes} attributes. The manageable attributes are %{managed_attributes}.") % { unmanaged_attributes: unmanaged_attributes.join(', '), managed_attributes: managed_attributes.join(', ') }
+    end
+
+    new_attributes = new_attributes.map do |attribute, value|
+      unmunge_attribute(attribute, value)
+    end
+
+    Hash[new_attributes]
+  end
+
+  def attributes=(new_attributes)
+    new_attributes = validate_and_unmunge(new_attributes)
+
+    if (full_name = new_attributes.delete(:full_name))
+      user['FullName'] = full_name
+    end
+
+    # The remaining attributes are mapped to userflags.
+    attributes_to_add, attributes_to_remove = new_attributes.partition do |_, value|
+      value == true
+    end
+    flags_to_set, flags_to_unset = [attributes_to_add, attributes_to_remove].map do |attributes|
+      attributes.map { |(attribute, _)| userflag_of(attribute) }
+    end
+
+    user.set_userflags(*flags_to_set)
+    user.unset_userflags(*flags_to_unset)
   end
 
   [:gid, :shell].each do |prop|
