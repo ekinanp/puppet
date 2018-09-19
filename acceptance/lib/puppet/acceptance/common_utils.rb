@@ -1,5 +1,12 @@
 module Puppet
   module Acceptance
+    module BeakerUtils
+      # TODO: This should be added to Beaker
+      def assert_matching_arrays(expected, actual, message = "")
+        assert_equal(expected.sort, actual.sort, message)
+      end
+    end
+
     module CronUtils
       def clean(agent, o={})
         o = {:user => 'tstuser'}.merge(o)
