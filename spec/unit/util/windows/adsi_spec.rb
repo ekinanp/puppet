@@ -95,6 +95,7 @@ describe Puppet::Util::Windows::ADSI, :if => Puppet::Util::Platform.windows? do
 
     it "should be able to create a user" do
       adsi_user = stub('adsi')
+      adsi_user.expects(:SetInfo)
 
       connection.expects(:Create).with('user', username).returns(adsi_user)
       Puppet::Util::Windows::ADSI::Group.expects(:exists?).with(username).returns(false)
@@ -190,26 +191,7 @@ describe Puppet::Util::Windows::ADSI, :if => Puppet::Util::Platform.windows? do
         adsi_user.expects(:SetPassword).with('pwd')
         adsi_user.expects(:SetInfo).at_least_once
 
-        flagname = "UserFlags"
-        fADS_UF_DONT_EXPIRE_PASSWD = 0x10000
-
-        adsi_user.expects(:Get).with(flagname).returns(0)
-        adsi_user.expects(:Put).with(flagname, fADS_UF_DONT_EXPIRE_PASSWD)
-
         user.password = 'pwd'
-      end
-
-       it "should be able manage a user without a password" do
-        adsi_user.expects(:SetPassword).with('pwd').never
-        adsi_user.expects(:SetInfo).at_least_once
-
-        flagname = "UserFlags"
-        fADS_UF_DONT_EXPIRE_PASSWD = 0x10000
-
-        adsi_user.expects(:Get).with(flagname).returns(0)
-        adsi_user.expects(:Put).with(flagname, fADS_UF_DONT_EXPIRE_PASSWD)
-
-        user.password = nil
       end
 
       it "should generate the correct URI" do

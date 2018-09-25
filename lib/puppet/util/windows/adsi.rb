@@ -281,7 +281,11 @@ module Puppet::Util::Windows::ADSI
       def create(name)
         # Windows error 1379: The specified local group already exists.
         raise Puppet::Error.new(_("Cannot create user if group '%{name}' exists.") % { name: name }) if Puppet::Util::Windows::ADSI::Group.exists? name
-        new(name, Puppet::Util::Windows::ADSI.create(name, @object_class))
+
+        user = new(name, Puppet::Util::Windows::ADSI.create(name, @object_class))
+        user.commit
+
+        user
       end
     end
 
@@ -298,13 +302,10 @@ module Puppet::Util::Windows::ADSI
     end
 
     def password=(password)
-      if !password.nil?
-        native_object.SetPassword(password)
-        commit
-      end
+      return if password.nil?
 
-      fADS_UF_DONT_EXPIRE_PASSWD = 0x10000
-      add_flag("UserFlags", fADS_UF_DONT_EXPIRE_PASSWD)
+      native_object.SetPassword(password)
+      commit
     end
 
     def groups
