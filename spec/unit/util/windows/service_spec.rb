@@ -10,6 +10,10 @@ describe "Puppet::Util::Windows::Service", :if => Puppet.features.microsoft_wind
       .returns("fake error!")
   end
 
+  def service_state_str(state)
+    Puppet::Util::Windows::Service::SERVICE_STATES[state].to_s
+  end
+
   # The following should emulate a successful call to the private function
   # query_status that returns the value of query_return. This should give
   # us a way to mock changes in service status.
@@ -19,6 +23,12 @@ describe "Puppet::Util::Windows::Service", :if => Puppet.features.microsoft_wind
   # returns the value passed in as a param
   def expect_successful_status_query_and_return(query_return)
     subject::SERVICE_STATUS_PROCESS.expects(:new).in_sequence(status_checks).returns(query_return)
+  end
+
+  def expect_successful_status_queries_and_return(*query_returns)
+    query_returns.each do |query_return|
+      expect_successful_status_query_and_return(query_return)
+    end
   end
 
   # The following should emulate a successful call to the private function
@@ -42,8 +52,6 @@ describe "Puppet::Util::Windows::Service", :if => Puppet.features.microsoft_wind
   before do
     subject.stubs(:QueryServiceStatusEx).returns(1)
     subject.stubs(:QueryServiceConfigW).returns(1)
-    subject.stubs(:StartServiceW).returns(1)
-    subject.stubs(:ControlService).returns(1)
     subject.stubs(:ChangeServiceConfigW).returns(1)
     subject.stubs(:OpenSCManagerW).returns(scm)
     subject.stubs(:OpenServiceW).returns(service)
@@ -90,8 +98,246 @@ describe "Puppet::Util::Windows::Service", :if => Puppet.features.microsoft_wind
     end
   end
 
-  describe "#start" do
+  # This shared example contains the unit tests for the send_service_control_signal
+  # helper as used by service actions like #stop. Before including this example in
+  # your tests, be sure to define the following variables in a `let` context:
+  #     * signal        -- The service control signal to send
+  #     * initial_state -- The service's initial state before sending the signal
+  #     * final_state   -- The service's final state after sending the signal
+  #
+  shared_examples "a service action that sends a service control signal" do |action|
+    it "raises a Puppet::Error if ControlService returns false" do
+      expect_successful_status_query_and_return(dwCurrentState: initial_state)
 
+      subject.stubs(:ControlService).with(service, signal, anything).returns(FFI::WIN32_FALSE)
+
+      expect { subject.send(action, mock_service_name) }.to raise_error do |error|
+        expect(error).to be_a(Puppet::Error)
+
+        expect(error.message).to match(subject::SERVICE_CONTROL_SIGNALS[signal].to_s)
+        expect(error.message).to match(service_state_str(initial_state))
+      end
+    end
+
+    it "#{action}s the service" do
+      expect_successful_status_queries_and_return(
+        { dwCurrentState: initial_state },
+        { dwCurrentState: final_state }
+      )
+
+      subject.expects(:ControlService).with(service, signal, anything).returns(1)
+
+      subject.send(action, mock_service_name)
+    end
+  end
+
+  # This shared example contains the unit tests for the wait_on_pending_state
+  # helper as used by service actions like #start and #stop. Before including
+  # this shared example, be sure to mock out any intermediate calls prior to
+  # the pending transition, and make sure that the post-condition _after_ those
+  # intermediate calls leaves the service in the pending state. Before including
+  # this example in your tests, be sure to define the following variables in a `let`
+  # context:
+  #     * action -- The service action
+  shared_examples "a service action waiting on a pending transition" do |pending_state|
+    pending_state_str = Puppet::Util::Windows::Service::SERVICE_STATES[pending_state].to_s
+
+    final_state = Puppet::Util::Windows::Service::FINAL_STATES[pending_state]
+    final_state_str = Puppet::Util::Windows::Service::SERVICE_STATES[final_state].to_s
+
+    it "raises a Puppet::Error if the service query fails" do
+      subject.expects(:QueryServiceStatusEx).in_sequence(status_checks).returns(FFI::WIN32_FALSE)
+
+      expect { subject.send(action, mock_service_name) }.to raise_error(Puppet::Error)
+    end
+
+    it "raises a Puppet::Error if the service unexpectedly transitions to a state other than #{pending_state_str} or #{final_state_str}" do
+      invalid_state = (subject::SERVICE_STATES.keys - [pending_state, final_state]).first
+
+      expect_successful_status_query_and_return(dwCurrentState: invalid_state)
+
+      expect { subject.send(action, mock_service_name) }.to raise_error do |error|
+        expect(error).to be_a(Puppet::Error)
+
+        expect(error.message).to match(/[Uu]nexpected/)
+        expect(error.message).to match(service_state_str(invalid_state))
+        expect(error.message).to match(service_state_str(pending_state))
+        expect(error.message).to match(service_state_str(final_state))
+      end
+    end
+
+    it "waits for at least 1 second if the wait_hint/10 is < 1 second" do
+      expect_successful_status_queries_and_return(
+        { :dwCurrentState => pending_state, :dwWaitHint => 0, :dwCheckPoint => 1 },
+        { :dwCurrentState => final_state }
+      )
+
+      subject.expects(:sleep).with(1)
+
+      subject.send(action, mock_service_name)
+    end
+
+    it "waits for at most 10 seconds if wait_hint/10 is > 10 seconds" do
+      expect_successful_status_queries_and_return(
+        { :dwCurrentState => pending_state, :dwWaitHint => 1000000, :dwCheckPoint => 1 },
+        { :dwCurrentState => final_state }
+      )
+
+      subject.expects(:sleep).with(10)
+
+      subject.send(action, mock_service_name)
+    end
+
+    it "does not raise an error if the service makes any progress while transitioning to #{final_state_str}" do
+      expect_successful_status_queries_and_return(
+        # The three "pending_state" statuses simulate the scenario where the service
+        # makes some progress during the transition right when Puppet's about to
+        # time out.
+        { :dwCurrentState => pending_state, :dwWaitHint => 100000, :dwCheckPoint => 1 },
+        { :dwCurrentState => pending_state, :dwWaitHint => 100000, :dwCheckPoint => 1 },
+        { :dwCurrentState => pending_state, :dwWaitHint => 100000, :dwCheckPoint => 2 },
+
+        { :dwCurrentState => final_state }
+      )
+
+      expect { subject.send(action, mock_service_name) }.to_not raise_error
+    end
+
+    it "raises a Puppet::Error if it times out while waiting for the transition to #{final_state_str}" do
+      expect_successful_status_queries_and_return(
+        *([{ :dwCurrentState => pending_state, :dwWaitHint => 10000, :dwCheckPoint => 1 }] * 31)
+
+        # Don't need to return anything else here, as at this point Puppet
+        # should have timed out while waiting for the service.
+      )
+
+      expect { subject.send(action, mock_service_name) }.to raise_error do |error|
+        expect(error).to be_a(Puppet::Error)
+
+        expect(error.message).to match(/[Tt]imed/)
+        expect(error.message).to match(service_state_str(pending_state))
+        expect(error.message).to match(service_state_str(final_state))
+      end
+    end
+  end
+
+  # This shared example contains the unit tests for the transition_service_state
+  # helper, which is the helper that all of our service actions like #start, #stop
+  # delegate to. Including these tests under a shared example lets us include them in each of
+  # those service action's unit tests. When including this shared example, be sure to
+  # mock out any calls that perform the state transition. See, for example, the unit
+  # tests for the #start method.
+  #
+  shared_examples "a service action that transitions the service state" do |action, valid_initial_states, pending_state, to_state|
+    valid_initial_states_str = valid_initial_states.map do |state|
+      Puppet::Util::Windows::Service::SERVICE_STATES[state]
+    end.join(', ')
+    pending_state_str = Puppet::Util::Windows::Service::SERVICE_STATES[pending_state].to_s
+    to_state_str = Puppet::Util::Windows::Service::SERVICE_STATES[to_state].to_s
+
+    it "raises a Puppet::Error if the service's initial state is not one of #{valid_initial_states_str}" do
+      invalid_initial_state = (subject::SERVICE_STATES.keys - valid_initial_states).first
+      expect_successful_status_query_and_return(dwCurrentState: invalid_initial_state)
+
+      expect{ subject.send(action, mock_service_name) }.to raise_error do |error|
+        expect(error).to be_a(Puppet::Error)
+
+        expect(error.message).to match(valid_initial_states_str)
+        expect(error.message).to match(service_state_str(invalid_initial_state))
+      end
+    end
+
+    # If the service action accepts an unsafe pending state as one of the service's
+    # initial states, then we need to test that the action waits for the service to
+    # transition from that unsafe pending state before doing anything else.
+    unsafe_pending_states = valid_initial_states & Puppet::Util::Windows::Service::UNSAFE_PENDING_STATES
+    unless unsafe_pending_states.empty?
+      unsafe_pending_state = unsafe_pending_states.first
+      unsafe_pending_state_str = Puppet::Util::Windows::Service::SERVICE_STATES[unsafe_pending_state]
+
+      context "waiting for a service with #{unsafe_pending_state_str} as its initial state" do
+        # Here we set the service's initial state to the unsafe_pending_state
+        before(:each) do
+          # This mocks the status query to return the 'to_state' by default. Otherwise,
+          # we will fail the tests in the latter parts of the code where we wait for the
+          # service to finish transitioning to the 'to_state'.
+          subject::SERVICE_STATUS_PROCESS.stubs(:new).returns(dwCurrentState: to_state)
+
+          # This sets our service's initial state
+          expect_successful_status_query_and_return(dwCurrentState: unsafe_pending_state)
+        end
+
+        include_examples "a service action waiting on a pending transition", unsafe_pending_state do
+          let(:action) { action }
+        end
+      end
+    end
+
+    # reads e.g. "waiting for the service to transition to the SERVICE_RUNNING state after starting it"
+    #
+    # NOTE: This is really unit testing the wait_on_state_transition helper
+    context "waiting for the service to transition to the #{to_state_str} state after executing the #{action} action" do
+      # Choose an arbitrary initial state. We want to ensure that it does not
+      # correspond to an unsafe pending state so we can simplify our mocking.
+      # It is OK for us to do this here because we already have separate unit
+      # tests for that behavior.
+      let(:initial_state) do
+        initial_states = (valid_initial_states - subject::UNSAFE_PENDING_STATES)
+
+        initial_states.first
+      end
+
+      before(:each) do
+        # This sets our service's initial state
+        expect_successful_status_query_and_return(dwCurrentState: initial_state)
+      end
+
+      it "raises a Puppet::Error if the service query fails" do
+        subject.expects(:QueryServiceStatusEx).in_sequence(status_checks).returns(FFI::WIN32_FALSE)
+
+        expect { subject.send(action, mock_service_name) }.to raise_error(Puppet::Error)
+      end
+
+      it "waits, then queries again until it transitions to #{to_state_str}" do
+        expect_successful_status_queries_and_return(
+          { :dwCurrentState => initial_state },
+          { :dwCurrentState => initial_state },
+          { :dwCurrentState => to_state }
+        )
+
+        subject.expects(:sleep).with(1).twice
+
+        subject.send(action, mock_service_name)
+      end
+
+      context "when it transitions to the #{pending_state_str} state" do
+        before(:each) do
+          expect_successful_status_query_and_return(dwCurrentState: pending_state)
+        end
+
+        include_examples "a service action waiting on a pending transition", pending_state do
+          let(:action) { action }
+        end
+      end
+
+      it "raises a Puppet::Error if it times out while waiting for the transition to #{to_state_str}" do
+        31.times do
+          expect_successful_status_query_and_return(dwCurrentState: initial_state)
+        end
+
+        expect { subject.send(action, mock_service_name) }.to raise_error do |error|
+          expect(error).to be_a(Puppet::Error)
+
+          expect(error.message).to match(/[Tt]ime/)
+          expect(error.message).to match(service_state_str(initial_state))
+          expect(error.message).to match(pending_state_str)
+          expect(error.message).to match(to_state_str)
+        end
+      end
+    end
+  end
+
+  describe "#start" do
     context "when the service control manager cannot be opened" do
       let(:scm) { FFI::Pointer::NULL_HANDLE }
       it "raises a puppet error" do
@@ -106,161 +352,40 @@ describe "Puppet::Util::Windows::Service", :if => Puppet.features.microsoft_wind
       end
     end
 
-    context "when the service can be opened and is in the stopped state" do
-      before do
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED})
+    context "when the service can be opened" do
+      # Can't use rspec's subject here because that
+      # can only be referenced inside an 'it' block.
+      service = Puppet::Util::Windows::Service
+      valid_initial_states = [service::SERVICE_STOP_PENDING, service::SERVICE_STOPPED]
+      to_state = service::SERVICE_RUNNING
+  
+      include_examples "a service action that transitions the service state", :start, valid_initial_states, service::SERVICE_START_PENDING, to_state do
+        before(:each) do
+          subject.stubs(:StartServiceW).returns(1)
+        end
       end
-
-      it "Starts the service once the service reports SERVICE_RUNNING" do
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        subject.start(mock_service_name)
-      end
-
-      it "Raises an error if after calling StartServiceW the service never transitions to RUNNING or START_PENDING" do
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_PAUSED}).times(31)
-        expect{ subject.start(mock_service_name) }.to raise_error(Puppet::Error)
-      end
-
-      it "raises a puppet error if StartServiceW returns false" do
+  
+      it "raises a Puppet::Error if StartServiceW returns false" do
+        expect_successful_status_query_and_return(dwCurrentState: subject::SERVICE_STOPPED)
+  
         subject.expects(:StartServiceW).returns(FFI::WIN32_FALSE)
-        expect{ subject.start(mock_service_name) }.to raise_error(Puppet::Error)
-      end
-    end
 
-    context "when the service hasn't stopped yet:" do
-      it "waits, then queries again until SERVICE_STOPPED" do
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 1})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 1})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 50})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        subject.expects(:sleep).with(3).twice
+        expect { subject.start(mock_service_name) }.to raise_error do |error|
+          expect(error).to be_a(Puppet::Error)
+  
+          expect(error.message).to match('start')
+        end
+      end
+  
+      it "starts the service" do
+        expect_successful_status_queries_and_return(
+          { dwCurrentState: subject::SERVICE_STOPPED },
+          { dwCurrentState: subject::SERVICE_RUNNING }
+        )
+  
+        subject.expects(:StartServiceW).returns(1)
+  
         subject.start(mock_service_name)
-      end
-
-      it "waits for at least 1 second if wait hint/10 is < 1 second" do
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 1})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 0, :dwCheckPoint => 1})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        subject.expects(:sleep).with(1)
-        subject.start(mock_service_name)
-      end
-
-      it "waits for at most 10 seconds if wait hint/10 is > 10 seconds" do
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 1})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 1000000, :dwCheckPoint => 1})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        subject.expects(:sleep).with(10)
-        subject.start(mock_service_name)
-      end
-
-      it "raises a puppet error if the service query fails" do
-        subject.expects(:QueryServiceStatusEx).in_sequence(status_checks).returns(1)
-        subject.expects(:QueryServiceStatusEx).in_sequence(status_checks).returns(FFI::WIN32_FALSE)
-        expect{subject.start(mock_service_name)}.to raise_error(Puppet::Error)
-      end
-
-      it "Does not raise an error if the service makes progress" do
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 0, :dwCheckPoint => 0})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 0, :dwCheckPoint => 0})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 0, :dwCheckPoint => 2})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 0, :dwCheckPoint => 30})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 0, :dwCheckPoint => 50})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 0, :dwCheckPoint => 98})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        expect{subject.start(mock_service_name)}.to_not raise_error
-      end
-    end
-
-    context "when the service ends up still in STOPPED:" do
-      it "waits, then queries again until RUNNING" do
-        # these will be before the call to controlService
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED})
-        # everything from here on will be _after_ the call to ControlService
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 1})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 50})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        subject.start(mock_service_name)
-      end
-
-      it "raises a puppet error if the services never exits the RUNNING state" do
-        # these will be before the call to controlService
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED})
-        # the number of times here is a little strange: there are 31 status queries sleeps because there will be a 31st query
-        # that is the final query where the command has reached the wait hint and it's time to error
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED}).times(31)
-        subject.expects(:sleep).times(30).with(1)
-        expect{subject.start(mock_service_name)}.to raise_error(Puppet::Error)
-      end
-    end
-
-    context "when the service ends up in START_PENDING:" do
-      before(:each) do
-        # these will be before the call to StartService
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED})
-      end
-
-      it "waits, then queries again until SERVICE_RUNNING" do
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 1})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 50})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        subject.start(mock_service_name)
-      end
-
-      it "waits for at least 1 second if wait hint/10 is < 1 second" do
-        # the first call is executed in wait_for_state, which we aren't testing here
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 0, :dwCheckPoint => 2})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        subject.expects(:sleep).with(1)
-        subject.start(mock_service_name)
-      end
-
-      it "waits for at most 10 seconds if wait hint/10 is > 10 seconds" do
-        # the first call is executed in wait_for_state, which we aren't testing here
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 1000000, :dwCheckPoint => 1})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        subject.expects(:sleep).with(10)
-        subject.start(mock_service_name)
-      end
-
-      it "raises a puppet error if the services configured dwWaitHint is 0, 30 seconds have passed and dwCheckPoint hasn't increased" do
-        # the first call is executed in wait_for_state, which we aren't testing here
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 0, :dwCheckPoint => 0}).times(31)
-        subject.expects(:sleep).times(30).with(1)
-        expect{subject.start(mock_service_name)}.to raise_error(Puppet::Error)
-      end
-
-      it "raises a puppet error if the service's configured dwWaitHint has passed and dwCheckPoint hasn't increased" do
-        # the first call is executed in wait_for_state, which we aren't testing here
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 40000, :dwCheckPoint => 0}).times(11)
-        subject.expects(:sleep).times(10).with(4)
-        expect{subject.start(mock_service_name)}.to raise_error(Puppet::Error)
-      end
-
-      it "Does not raise an error if the service makes progress" do
-        # the first call is executed in wait_for_state, which we aren't testing here
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 0, :dwCheckPoint => 0})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 0, :dwCheckPoint => 2})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 0, :dwCheckPoint => 30})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 0, :dwCheckPoint => 50})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_START_PENDING, :dwWaitHint => 0, :dwCheckPoint => 98})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-        subject.expects(:sleep).times(5).with(1)
-        expect{subject.start(mock_service_name)}.to_not raise_error
       end
     end
   end
@@ -269,83 +394,33 @@ describe "Puppet::Util::Windows::Service", :if => Puppet.features.microsoft_wind
     context "when the service control manager cannot be opened" do
       let(:scm) { FFI::Pointer::NULL_HANDLE }
       it "raises a puppet error" do
-        expect{ subject.stop(mock_service_name) }.to raise_error(Puppet::Error)
+        expect{ subject.start(mock_service_name) }.to raise_error(Puppet::Error)
       end
     end
 
     context "when the service cannot be opened" do
       let(:service) { FFI::Pointer::NULL_HANDLE }
       it "raises a puppet error" do
-        expect{ subject.stop(mock_service_name) }.to raise_error(Puppet::Error)
+        expect{ subject.start(mock_service_name) }.to raise_error(Puppet::Error)
       end
     end
 
-    context "when the service can be opened and is in the running state:" do
-      before do
-        # this will be before the call to controlService
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
+    context "when the service can be opened" do
+      service = Puppet::Util::Windows::Service
+      valid_initial_states = service::SERVICE_STATES.keys - [service::SERVICE_STOP_PENDING, service::SERVICE_STOPPED]
+      to_state = service::SERVICE_STOPPED
+  
+      include_examples "a service action that transitions the service state", :stop, valid_initial_states, service::SERVICE_STOP_PENDING, to_state do
+        before(:each) do
+          subject.stubs(:ControlService).returns(1)
+        end
       end
-      it "raises a puppet error if ControlService returns false" do
-        subject.expects(:ControlService).returns(FFI::WIN32_FALSE)
-        expect{ subject.stop(mock_service_name) }.to raise_error(Puppet::Error)
-      end
-    end
+  
+      include_examples "a service action that sends a service control signal", :stop do
+        let(:signal)        { subject::SERVICE_CONTROL_STOP }
 
-    # No need to retest the wait hint functionality itself here, since
-    # both stop and start use the wait_for_pending_transition helper
-    # which is tested in the start unit tests.
-    context "when the service is already in stop pending or stopped" do
-      it "waits for the service to stop and then exits immediately" do
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 1})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 5})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED})
-        subject.stop(mock_service_name)
-      end
-    end
-
-    context "when the service ends up in STOP_PENDING:" do
-      before(:each) do
-        # this will be before the call to controlService
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-      end
-
-      it "waits, then queries again until SERVICE_STOPPED" do
-        # the first call is to wait_for_state, which we don't test here
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING})
-        # everything from here on will be _after_ the call to ControlService
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 1})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 50})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED})
-        subject.stop(mock_service_name)
-      end
-
-      it "raises a puppet error if the services never exits the STOP_PENDING state" do
-        # the first call is to wait_for_state, which we don't test here
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 0, :dwCheckPoint => 0}).times(31)
-        expect{subject.stop(mock_service_name)}.to raise_error(Puppet::Error)
-      end
-    end
-
-    context "when the service ends up still in RUNNING:" do
-      before(:each) do
-        # this will be before the call to controlService
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING})
-      end
-      it "waits, then queries again until SERVICE_STOPPED" do
-        # the first call is to wait_for_state, which we don't test here
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING, :dwWaitHint => 0, :dwCheckPoint => 0}).times(10)
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 1})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOP_PENDING, :dwWaitHint => 30000, :dwCheckPoint => 50})
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_STOPPED})
-        subject.stop(mock_service_name)
-      end
-
-      it "raises a puppet error if the services never exits the RUNNING state" do
-        # the first call is to wait_for_state, which we don't test here
-        expect_successful_status_query_and_return({:dwCurrentState => subject::SERVICE_RUNNING, :dwWaitHint => 0, :dwCheckPoint => 0}).times(31)
-        subject.expects(:sleep).times(30).with(1)
-        expect{subject.stop(mock_service_name)}.to raise_error(Puppet::Error)
+        let(:initial_state) { subject::SERVICE_RUNNING }
+        let(:final_state)   { subject::SERVICE_STOPPED }
       end
     end
   end
