@@ -181,6 +181,30 @@ describe Puppet::Util::FileType do
     end
   end
 
+  describe "the crontab filetype", :unless => Puppet.features.microsoft_windows? do
+    let(:type)           { Puppet::Util::FileType.filetype(:crontab) }
+    let(:name)           { type.name }
+    let(:crontab_output) { 'crontab_output' }
+
+    before(:each) do
+      # We stub the operatingsystem fact so that the #remove method's
+      # default unit tests pass.
+      Facter.stubs(:value).with("operatingsystem").returns("RedHat")
+    end
+
+    # possible crontab output was taken from here:
+    # https://docs.oracle.com/cd/E19082-01/819-2380/sysrescron-60/index.html
+    let(:absent_crontab) do
+      'no crontab for root'
+    end
+    let(:unauthorized_crontab) do
+      'You (user) are not allowed to use this program (crontab)'\
+      'See crontab(1) for more information'
+    end
+
+    it_should_behave_like "crontab provider"
+  end
+
   describe "the suntab filetype", :unless => Puppet.features.microsoft_windows? do
     let(:type)           { Puppet::Util::FileType.filetype(:suntab) }
     let(:name)           { type.name }

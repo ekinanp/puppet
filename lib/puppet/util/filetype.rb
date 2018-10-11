@@ -69,6 +69,52 @@ class Puppet::Util::FileType
     end
   end
 
+  # Create a new crontab type.
+  def self.new_crontab_type(name, &block)
+    newfiletype(name) do
+      # Arguments that will be passed to the execute method. Will set the uid
+      # to the target user if the target user and the current user are not
+      # the same
+      def cronargs
+        if uid = Puppet::Util.uid(@path) and uid == Puppet::Util::SUIDManager.uid
+          {:failonfail => true, :combine => true}
+        else
+          {:failonfail => true, :combine => true, :uid => @path}
+        end
+      end
+
+      # Remove a specific @path's cron tab.
+      def remove
+        Puppet::Util::Execution.execute(%w{crontab -r}, cronargs)
+      rescue => detail
+        raise FileReadError, _("Could not remove crontab for %{path}: %{detail}") % { path: @path, detail: detail }, detail.backtrace
+      end
+
+      # Overwrite a specific @path's cron tab; must be passed the @path name
+      # and the text with which to create the cron tab.
+      def write(text)
+        # this file is managed by the OS and should be using system encoding
+        output_file = Tempfile.new("puppet_#{self.class.name}", :encoding => Encoding.default_external)
+        begin
+          output_file.print text
+          output_file.close
+          # We have to chown the stupid file to the user.
+          File.chown(Puppet::Util.uid(@path), nil, output_file.path)
+          Puppet::Util::Execution.execute(["crontab", output_file.path], cronargs)
+        rescue => detail
+          raise FileReadError, _("Could not write crontab for %{path}: %{detail}") % { path: @path, detail: detail }, detail.backtrace
+        ensure
+          output_file.close
+          output_file.unlink
+        end
+      end
+
+      # Call the passed-in block to define/override additional
+      # methods
+      class_eval &block
+    end
+  end
+
   def self.filetype(type)
     @filetypes[type]
   end
@@ -82,17 +128,6 @@ class Puppet::Util::FileType
     raise ArgumentError.new(_("Path is nil")) if path.nil?
     @path = path
     @default_mode = default_mode
-  end
-
-  # Arguments that will be passed to the execute method. Will set the uid
-  # to the target user if the target user and the current user are not
-  # the same
-  def cronargs
-    if uid = Puppet::Util.uid(@path) and uid == Puppet::Util::SUIDManager.uid
-      {:failonfail => true, :combine => true}
-    else
-      {:failonfail => true, :combine => true, :uid => @path}
-    end
   end
 
   # Operate on plain files.
@@ -166,62 +201,36 @@ class Puppet::Util::FileType
   end
 
   # Handle Linux-style cron tabs.
-  newfiletype(:crontab) do
-    def initialize(user)
-      self.path = user
-    end
-
-    def path=(user)
-      begin
-        @uid = Puppet::Util.uid(user)
-      rescue Puppet::Error => detail
-        raise FileReadError, _("Could not retrieve user %{user}: %{detail}") % { user: user, detail: detail }, detail.backtrace
-      end
-
-      # XXX We have to have the user name, not the uid, because some
-      # systems *cough*linux*cough* require it that way
-      @path = user
-    end
-
+  new_crontab_type(:crontab) do
     # Read a specific @path's cron tab.
     def read
-      %x{#{cmdbase} -l 2>/dev/null}
+      Puppet::Util::Execution.execute(%w{crontab -l}, cronargs)
+    rescue => detail
+      case detail.to_s
+      when /no crontab for/
+        return ""
+      when /are not allowed to/
+        raise FileReadError, _("User %{path} not authorized to use cron") % { path: @path }, detail.backtrace
+      else
+        raise FileReadError, _("Could not read crontab for %{path}: %{detail}") % { path: @path, detail: detail }, detail.backtrace
+      end
     end
 
     # Remove a specific @path's cron tab.
     def remove
       if %w{Darwin FreeBSD DragonFly}.include?(Facter.value("operatingsystem"))
-        %x{/bin/echo yes | #{cmdbase} -r 2>/dev/null}
+        Puppet::Util::Execution.execute('/bin/echo yes | crontab -r', cronargs)
       else
-        %x{#{cmdbase} -r 2>/dev/null}
+        Puppet::Util::Execution.execute(%w{crontab -r}, cronargs)
       end
-    end
-
-    # Overwrite a specific @path's cron tab; must be passed the @path name
-    # and the text with which to create the cron tab.
-    def write(text)
-      # this file is managed by the OS and should be using system encoding
-      IO.popen("#{cmdbase()} -", "w", :encoding => Encoding.default_external) { |p|
-        p.print text
-      }
-    end
-
-    private
-
-    # Only add the -u flag when the @path is different.  Fedora apparently
-    # does not think I should be allowed to set the @path to my own user name
-    def cmdbase
-      if @uid == Puppet::Util::SUIDManager.uid || Facter.value(:operatingsystem) == "HP-UX"
-        return "crontab"
-      else
-        return "crontab -u #{@path}"
-      end
+    rescue => detail
+      raise FileReadError, _("Could not remove crontab for %{path}: %{detail}") % { path: @path, detail: detail }, detail.backtrace
     end
   end
 
   # SunOS has completely different cron commands; this class implements
   # its versions.
-  newfiletype(:suntab) do
+  new_crontab_type(:suntab) do
     # Read a specific @path's cron tab.
     def read
       Puppet::Util::Execution.execute(%w{crontab -l}, cronargs)
@@ -235,36 +244,10 @@ class Puppet::Util::FileType
         raise FileReadError, _("Could not read crontab for %{path}: %{detail}") % { path: @path, detail: detail }, detail.backtrace
       end
     end
-
-    # Remove a specific @path's cron tab.
-    def remove
-      Puppet::Util::Execution.execute(%w{crontab -r}, cronargs)
-    rescue => detail
-      raise FileReadError, _("Could not remove crontab for %{path}: %{detail}") % { path: @path, detail: detail }, detail.backtrace
-    end
-
-    # Overwrite a specific @path's cron tab; must be passed the @path name
-    # and the text with which to create the cron tab.
-    def write(text)
-      # this file is managed by the OS and should be using system encoding
-      output_file = Tempfile.new("puppet_suntab", :encoding => Encoding.default_external)
-      begin
-        output_file.print text
-        output_file.close
-        # We have to chown the stupid file to the user.
-        File.chown(Puppet::Util.uid(@path), nil, output_file.path)
-        Puppet::Util::Execution.execute(["crontab", output_file.path], cronargs)
-      rescue => detail
-        raise FileReadError, _("Could not write crontab for %{path}: %{detail}") % { path: @path, detail: detail }, detail.backtrace
-      ensure
-        output_file.close
-        output_file.unlink
-      end
-    end
   end
 
-  #  Support for AIX crontab with output different than suntab's crontab command.
-  newfiletype(:aixtab) do
+  # Support for AIX crontab with output different than suntab's crontab command.
+  new_crontab_type(:aixtab) do
     # Read a specific @path's cron tab.
     def read
       Puppet::Util::Execution.execute(%w{crontab -l}, cronargs)
@@ -276,33 +259,6 @@ class Puppet::Util::FileType
         raise FileReadError, _("User %{path} not authorized to use cron") % { path: @path }, detail.backtrace
       else
         raise FileReadError, _("Could not read crontab for %{path}: %{detail}") % { path: @path, detail: detail }, detail.backtrace
-      end
-    end
-
-    # Remove a specific @path's cron tab.
-    def remove
-      Puppet::Util::Execution.execute(%w{crontab -r}, cronargs)
-    rescue => detail
-      raise FileReadError, _("Could not remove crontab for %{path}: %{detail}") % { path: @path, detail: detail }, detail.backtrace
-    end
-
-    # Overwrite a specific @path's cron tab; must be passed the @path name
-    # and the text with which to create the cron tab.
-    def write(text)
-      # this file is managed by the OS and should be using system encoding
-      output_file = Tempfile.new("puppet_aixtab", :encoding => Encoding.default_external)
-
-      begin
-        output_file.print text
-        output_file.close
-        # We have to chown the stupid file to the user.
-        File.chown(Puppet::Util.uid(@path), nil, output_file.path)
-        Puppet::Util::Execution.execute(["crontab", output_file.path], cronargs)
-      rescue => detail
-        raise FileReadError, _("Could not write crontab for %{path}: %{detail}") % { path: @path, detail: detail }, detail.backtrace
-      ensure
-        output_file.close
-        output_file.unlink
       end
     end
   end
