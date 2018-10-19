@@ -213,6 +213,9 @@ module Puppet::Util::Execution
       exec_args = [command, options, stdin, stdout, stderr]
       output = ''
 
+      puts("READER FD = #{reader.fileno}")
+      puts("CHILD STDOUT FD = #{stdout.fileno}")
+
       # We close stdin/stdout/stderr immediately after fork/exec as they're no longer needed by
       # this process. In most cases they could be closed later, but when `stdout` is the "writer"
       # pipe we must close it or we'll never reach eof on the `reader` pipe.
