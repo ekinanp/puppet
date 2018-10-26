@@ -95,7 +95,7 @@ RUBY
   end
 
   agents.each do |agent|
-    users = 6.times.collect { random_name }
+    users = 7.times.collect { random_name }
     users.each { |user| agent.user_absent(user) }
 
     group = random_name
@@ -174,7 +174,7 @@ RUBY
     end
 
     step "Verify that Puppet enforces inclusive user membership when auth_membership == true" do
-      group_members = [users[0]]
+      group_members = [users[0], users[6]]
 
       manifest = group_manifest(group, members: group_members, auth_membership: true)
       apply_manifest_on(agent, manifest)
