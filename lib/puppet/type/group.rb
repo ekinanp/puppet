@@ -110,8 +110,6 @@ module Puppet
       end
 
       def change_to_s(currentvalue, newvalue)
-        newvalue = newvalue.split(",") if newvalue != :absent
-
         if provider.respond_to?(:members_to_s)
           # for Windows ADSI
           # de-dupe the "newvalue" when the sync event message is generated,
@@ -122,7 +120,8 @@ module Puppet
         super(currentvalue, newvalue)
       end
 
-      # override Puppet::Property::List#retrieve
+      # override Puppet::Property::List#retrieve to require providers to return an array
+      # instead of a comma-separated list (for backwards compatibility)
       def retrieve
         if provider.respond_to?(:members_to_s)
           # Windows ADSI members returns SIDs, but retrieve needs names
@@ -130,7 +129,14 @@ module Puppet
           return provider.members_to_s(provider.members).split(',')
         end
 
-        super
+        provider.send(name)
+      end
+
+      # override Puppet::Property::List#should to pass-in an array to providers
+      # instead of a comma-separated list (for backwards compatibility)
+      def should
+        members = super
+        members.split(',')
       end
 
       # The members property should also accept a comma separated
@@ -159,7 +165,17 @@ module Puppet
           return provider.members_insync?(current, @should)
         end
 
-        super(current)
+        # Copy-pasted from Puppet::Property::List's insync because
+        # in Puppet::Property::List, should is a comma-separated list
+        # while here, it is treated as an array.
+
+        return true unless current
+
+        if current == :absent
+          current = []
+        end
+
+        current.sort == self.should
       end
     end
 
